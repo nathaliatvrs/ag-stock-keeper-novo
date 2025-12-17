@@ -18,54 +18,55 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, isLoading } = useAuth();
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
-
-  return <Layout>{children}</Layout>;
-}
-
-function PublicRoute({ children }: { children: React.ReactNode }) {
-  const { user, isLoading } = useAuth();
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-      </div>
-    );
-  }
-
-  if (user) {
-    return <Navigate to="/" replace />;
-  }
-
-  return <>{children}</>;
-}
-
 function AppRoutes() {
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    );
+  }
+
   return (
     <Routes>
-      <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
-      <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-      <Route path="/produtos" element={<ProtectedRoute><Products /></ProtectedRoute>} />
-      <Route path="/pedidos" element={<ProtectedRoute><Orders /></ProtectedRoute>} />
-      <Route path="/estoque/entrada" element={<ProtectedRoute><StockEntry /></ProtectedRoute>} />
-      <Route path="/estoque/consultar" element={<ProtectedRoute><StockConsult /></ProtectedRoute>} />
-      <Route path="/saidas" element={<ProtectedRoute><StockExits /></ProtectedRoute>} />
-      <Route path="/relatorio" element={<ProtectedRoute><StockReport /></ProtectedRoute>} />
-      <Route path="/pagamentos/pedidos" element={<ProtectedRoute><OrderPayments /></ProtectedRoute>} />
+      <Route 
+        path="/login" 
+        element={user ? <Navigate to="/" replace /> : <Login />} 
+      />
+      <Route 
+        path="/" 
+        element={user ? <Layout><Dashboard /></Layout> : <Navigate to="/login" replace />} 
+      />
+      <Route 
+        path="/produtos" 
+        element={user ? <Layout><Products /></Layout> : <Navigate to="/login" replace />} 
+      />
+      <Route 
+        path="/pedidos" 
+        element={user ? <Layout><Orders /></Layout> : <Navigate to="/login" replace />} 
+      />
+      <Route 
+        path="/estoque/entrada" 
+        element={user ? <Layout><StockEntry /></Layout> : <Navigate to="/login" replace />} 
+      />
+      <Route 
+        path="/estoque/consultar" 
+        element={user ? <Layout><StockConsult /></Layout> : <Navigate to="/login" replace />} 
+      />
+      <Route 
+        path="/saidas" 
+        element={user ? <Layout><StockExits /></Layout> : <Navigate to="/login" replace />} 
+      />
+      <Route 
+        path="/relatorio" 
+        element={user ? <Layout><StockReport /></Layout> : <Navigate to="/login" replace />} 
+      />
+      <Route 
+        path="/pagamentos/pedidos" 
+        element={user ? <Layout><OrderPayments /></Layout> : <Navigate to="/login" replace />} 
+      />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
