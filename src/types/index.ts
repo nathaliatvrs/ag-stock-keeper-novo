@@ -79,6 +79,7 @@ export interface StockItem {
   supplier: string;
   unitCost: number;
   entryDate: string;
+  exitDate: string | null;
   status: 'available' | 'exited';
   exitId: string | null;
 }

@@ -75,6 +75,7 @@ export default function StockConsult() {
         'Unidade': product?.unitType || '-',
         'Custo Unitário': item.unitCost,
         'Data Entrada': formatDate(item.entryDate),
+        'Data Saída': item.exitDate ? formatDate(item.exitDate) : '-',
         'Status': item.status === 'available' ? 'Disponível' : 'Saída',
       };
     });
@@ -137,12 +138,13 @@ export default function StockConsult() {
                   <TableHead>Unidade</TableHead>
                   <TableHead>Custo Unitário</TableHead>
                   <TableHead>Data Entrada</TableHead>
+                  <TableHead>Data Saída</TableHead>
                   <TableHead>Status</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredItems.length === 0 ? (
-                  <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">Nenhum item encontrado</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">Nenhum item encontrado</TableCell></TableRow>
                 ) : (
                   filteredItems.map((item, index) => {
                     const product = getProductInfo(item.productId);
@@ -154,6 +156,7 @@ export default function StockConsult() {
                         <TableCell className="capitalize">{product?.unitType || '-'}</TableCell>
                         <TableCell>{formatCurrency(item.unitCost)}</TableCell>
                         <TableCell>{formatDate(item.entryDate)}</TableCell>
+                        <TableCell>{item.exitDate ? formatDate(item.exitDate) : '-'}</TableCell>
                         <TableCell>{item.status === 'available' ? <Badge className="bg-success text-success-foreground">Disponível</Badge> : <Badge variant="secondary">Saída</Badge>}</TableCell>
                       </TableRow>
                     );

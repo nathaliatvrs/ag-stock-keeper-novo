@@ -96,7 +96,8 @@ export const login = async (email: string, password: string): Promise<ApiRespons
   await delay(500);
   // Mock login - replace with actual API call
   if (email && password) {
-    const isAdmin = email.includes('admin');
+    // Admin if email contains 'admin' or is the specific admin email
+    const isAdmin = email.toLowerCase().includes('admin') || email.toLowerCase() === 'admin@agconsultoria.com.br';
     localStorage.setItem('isAdmin', String(isAdmin));
     return { success: true, data: isAdmin ? adminUser : currentUser };
   }
@@ -306,6 +307,7 @@ export const createStockEntry = async (entryData: {
     supplier: order.supplier,
     unitCost: order.unitCost,
     entryDate: entryData.date,
+    exitDate: null,
     status: 'available' as const,
     exitId: null,
   }));
@@ -376,10 +378,10 @@ export const createStockExit = async (exitData: {
   
   stockExits = [...stockExits, newExit];
   
-  // Update stock items status
+  // Update stock items status and exit date
   stockItems = stockItems.map(item => 
     exitData.stockItemIds.includes(item.id) 
-      ? { ...item, status: 'exited' as const, exitId: newExit.id }
+      ? { ...item, status: 'exited' as const, exitId: newExit.id, exitDate: exitData.exitDate }
       : item
   );
   

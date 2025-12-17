@@ -10,8 +10,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { getStockItems, getStockExits, getProducts, createStockExit, confirmStockExit, getCurrentUser } from '@/services/api';
-import { StockItem, StockExit, User, Product } from '@/types';
+import { useAuth } from '@/contexts/AuthContext';
+import { getStockItems, getStockExits, getProducts, createStockExit, confirmStockExit } from '@/services/api';
+import { StockItem, StockExit, Product } from '@/types';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { exportToExcel } from '@/lib/excel';
 
@@ -19,21 +20,20 @@ export default function StockExits() {
   const [exits, setExits] = useState<StockExit[]>([]);
   const [availableItems, setAvailableItems] = useState<StockItem[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [formData, setFormData] = useState({ exitDate: new Date().toISOString().split('T')[0], observation: '' });
   const { toast } = useToast();
+  const { isAdmin } = useAuth();
 
   const fetchData = async () => {
     try {
-      const [exitsRes, itemsRes, userRes, productsRes] = await Promise.all([
-        getStockExits(), getStockItems({ status: 'available' }), getCurrentUser(), getProducts()
+      const [exitsRes, itemsRes, productsRes] = await Promise.all([
+        getStockExits(), getStockItems({ status: 'available' }), getProducts()
       ]);
       if (exitsRes.success && exitsRes.data) setExits(exitsRes.data);
       if (itemsRes.success && itemsRes.data) setAvailableItems(itemsRes.data);
-      if (userRes.success && userRes.data) setCurrentUser(userRes.data);
       if (productsRes.success && productsRes.data) setProducts(productsRes.data);
     } catch (error) { console.error('Error:', error); }
     finally { setLoading(false); }
@@ -105,7 +105,7 @@ export default function StockExits() {
                   <TableHead>Data Saída</TableHead>
                   <TableHead>Observação</TableHead>
                   <TableHead>Confirmado</TableHead>
-                  {currentUser?.role === 'admin' && <TableHead>Ações</TableHead>}
+                  {isAdmin && <TableHead>Ações</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -122,7 +122,7 @@ export default function StockExits() {
                       <TableCell>{formatDate(exit.exitDate)}</TableCell>
                       <TableCell className="max-w-[200px] truncate">{exit.observation}</TableCell>
                       <TableCell>{exit.confirmedBy ? <Badge className="bg-success text-success-foreground">{exit.confirmedByName}</Badge> : <Badge variant="secondary">Pendente</Badge>}</TableCell>
-                      {currentUser?.role === 'admin' && (
+                      {isAdmin && (
                         <TableCell>{!exit.confirmedBy && <Button variant="ghost" size="icon" onClick={() => handleConfirm(exit.id)} className="text-success"><Check className="h-4 w-4" /></Button>}</TableCell>
                       )}
                     </TableRow>

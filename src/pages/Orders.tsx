@@ -28,8 +28,9 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { getOrders, getProducts, createOrder, approveOrder, rejectOrder, getCurrentUser } from '@/services/api';
-import { Order, Product, User } from '@/types';
+import { useAuth } from '@/contexts/AuthContext';
+import { getOrders, getProducts, createOrder, approveOrder, rejectOrder } from '@/services/api';
+import { Order, Product } from '@/types';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { exportToExcel } from '@/lib/excel';
 
@@ -39,7 +40,6 @@ type SortDirection = 'asc' | 'desc';
 export default function Orders() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
@@ -53,13 +53,13 @@ export default function Orders() {
     quantity: '',
   });
   const { toast } = useToast();
+  const { isAdmin } = useAuth();
 
   const fetchData = async () => {
     try {
-      const [ordersRes, productsRes, userRes] = await Promise.all([
+      const [ordersRes, productsRes] = await Promise.all([
         getOrders(),
         getProducts(),
-        getCurrentUser(),
       ]);
       
       if (ordersRes.success && ordersRes.data) {
@@ -67,9 +67,6 @@ export default function Orders() {
       }
       if (productsRes.success && productsRes.data) {
         setProducts(productsRes.data);
-      }
-      if (userRes.success && userRes.data) {
-        setCurrentUser(userRes.data);
       }
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -306,7 +303,7 @@ export default function Orders() {
                   <TableHead>Solicitante</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Aprovador</TableHead>
-                  {currentUser?.role === 'admin' && (
+                  {isAdmin && (
                     <TableHead className="text-right">Ações</TableHead>
                   )}
                 </TableRow>
@@ -333,7 +330,7 @@ export default function Orders() {
                         <TableCell>{order.createdByName}</TableCell>
                         <TableCell>{getStatusBadge(order.status)}</TableCell>
                         <TableCell>{order.approvedByName || '-'}</TableCell>
-                        {currentUser?.role === 'admin' && (
+                        {isAdmin && (
                           <TableCell className="text-right">
                             {order.status === 'pending' && (
                               <div className="flex justify-end gap-2">

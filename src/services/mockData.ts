@@ -156,6 +156,7 @@ export const mockStockItems: StockItem[] = Array.from({ length: 50 }, (_, i) => 
   supplier: 'Eli Lilly',
   unitCost: 2500.00,
   entryDate: '2024-12-11',
+  exitDate: i >= 45 ? '2024-12-16' : null,
   status: i < 45 ? 'available' : 'exited',
   exitId: i >= 45 ? 'exit-1' : null,
 }));
