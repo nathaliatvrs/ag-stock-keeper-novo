@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useAuth } from '@/contexts/AuthContext';
-import agLogo from '@/assets/ag-logo.png';
+import agMarca from '@/assets/ag-marca.png';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -44,7 +44,7 @@ export default function Login() {
       <Card className="w-full max-w-md shadow-xl border-primary/20">
         <CardHeader className="space-y-4 text-center pb-2">
           <div className="flex justify-center">
-            <img src={agLogo} alt="AG Consultoria" className="h-16 w-auto" />
+            <img src={agMarca} alt="AG Consultoria" className="h-28 w-auto" />
           </div>
           <div>
             <CardTitle className="text-2xl font-bold text-primary">AG Consultoria</CardTitle>
