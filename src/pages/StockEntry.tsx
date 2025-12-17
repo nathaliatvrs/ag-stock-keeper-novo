@@ -98,7 +98,23 @@ export default function StockEntry() {
     fetchData();
   }, []);
 
+  // Calcula quantidade já entrada para cada pedido
+  const getEnteredQuantityForOrder = (orderId: string): number => {
+    return entries
+      .filter((entry) => entry.orderId === orderId)
+      .reduce((sum, entry) => sum + entry.quantity, 0);
+  };
+
+  // Filtra pedidos aprovados que ainda têm quantidade disponível
+  const availableOrders = approvedOrders.filter((order) => {
+    const enteredQty = getEnteredQuantityForOrder(order.id);
+    return enteredQty < order.quantity;
+  });
+
   const selectedOrder = approvedOrders.find((o) => o.id === formData.orderId);
+  const enteredQuantity = selectedOrder ? getEnteredQuantityForOrder(selectedOrder.id) : 0;
+  const remainingQuantity = selectedOrder ? selectedOrder.quantity - enteredQuantity : 0;
+  
   const originalTotal = selectedOrder && formData.quantity 
     ? selectedOrder.unitCost * parseInt(formData.quantity)
     : 0;
@@ -315,11 +331,14 @@ export default function StockEntry() {
                   <SelectValue placeholder="Selecione um pedido aprovado" />
                 </SelectTrigger>
                 <SelectContent>
-                  {approvedOrders.map((order) => (
-                    <SelectItem key={order.id} value={order.id}>
-                      {order.orderNumber} - {order.productName}
-                    </SelectItem>
-                  ))}
+                  {availableOrders.map((order) => {
+                    const remaining = order.quantity - getEnteredQuantityForOrder(order.id);
+                    return (
+                      <SelectItem key={order.id} value={order.id}>
+                        {order.orderNumber} - {order.productName} ({remaining} restantes)
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>
@@ -342,6 +361,14 @@ export default function StockEntry() {
                   <p className="text-xs text-muted-foreground">Qtd. Pedida</p>
                   <p className="font-medium">{selectedOrder.quantity}</p>
                 </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Já Entrada</p>
+                  <p className="font-medium">{enteredQuantity}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Disponível p/ Entrada</p>
+                  <p className="font-medium text-primary">{remainingQuantity}</p>
+                </div>
               </div>
             )}
 
@@ -357,12 +384,12 @@ export default function StockEntry() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="quantity">Quantidade</Label>
+                <Label htmlFor="quantity">Quantidade (máx: {remainingQuantity})</Label>
                 <Input
                   id="quantity"
                   type="number"
                   min="1"
-                  max={selectedOrder?.quantity}
+                  max={remainingQuantity}
                   value={formData.quantity}
                   onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
                   required
