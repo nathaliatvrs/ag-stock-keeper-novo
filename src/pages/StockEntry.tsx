@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search } from 'lucide-react';
+import { Plus, Search, Download } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -28,9 +28,10 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { getOrders, getStockEntries, createStockEntry } from '@/services/api';
-import { Order, StockEntry as StockEntryType, PaymentMethod } from '@/types';
+import { getOrders, getStockEntries, getProducts, createStockEntry } from '@/services/api';
+import { Order, StockEntry as StockEntryType, PaymentMethod, Product } from '@/types';
 import { formatCurrency, formatDate } from '@/lib/utils';
+import { exportToExcel } from '@/lib/excel';
 import { useNavigate } from 'react-router-dom';
 
 const paymentMethods: { value: PaymentMethod; label: string }[] = [
@@ -52,6 +53,7 @@ const installmentOptions = [
 
 export default function StockEntry() {
   const [entries, setEntries] = useState<StockEntryType[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [approvedOrders, setApprovedOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -62,15 +64,17 @@ export default function StockEntry() {
     quantity: '',
     paymentMethod: '' as PaymentMethod | '',
     installments: '1',
+    firstDueDate: new Date().toISOString().split('T')[0],
   });
   const { toast } = useToast();
   const navigate = useNavigate();
 
   const fetchData = async () => {
     try {
-      const [entriesRes, ordersRes] = await Promise.all([
+      const [entriesRes, ordersRes, productsRes] = await Promise.all([
         getStockEntries(),
         getOrders(),
+        getProducts(),
       ]);
       
       if (entriesRes.success && entriesRes.data) {
@@ -78,6 +82,9 @@ export default function StockEntry() {
       }
       if (ordersRes.success && ordersRes.data) {
         setApprovedOrders(ordersRes.data.filter((o) => o.status === 'approved'));
+      }
+      if (productsRes.success && productsRes.data) {
+        setProducts(productsRes.data);
       }
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -104,6 +111,47 @@ export default function StockEntry() {
       entry.productName.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const getProductInfo = (productId: string) => {
+    return products.find((p) => p.id === productId);
+  };
+
+  const calculateInstallmentDates = () => {
+    const numInstallments = parseInt(formData.installments);
+    const firstDate = new Date(formData.firstDueDate);
+    const dates: { number: number; date: string; value: number }[] = [];
+    
+    for (let i = 0; i < numInstallments; i++) {
+      const dueDate = new Date(firstDate);
+      dueDate.setMonth(dueDate.getMonth() + i);
+      dates.push({
+        number: i + 1,
+        date: dueDate.toISOString().split('T')[0],
+        value: installmentValue,
+      });
+    }
+    return dates;
+  };
+
+  const handleExport = () => {
+    const dataToExport = filteredEntries.map((entry) => {
+      const product = getProductInfo(entry.productId);
+      return {
+        'Nº Pedido': entry.orderNumber,
+        'Data Entrada': formatDate(entry.date),
+        'Produto': entry.productName,
+        'Fornecedor': entry.supplier,
+        'Unidade': product?.unitType || '-',
+        'Quantidade': entry.quantity,
+        'Valor Total': entry.totalValue,
+        'Pagamento': getPaymentMethodLabel(entry.paymentMethod),
+        'Parcelas': entry.installments,
+        'Responsável': entry.createdByName,
+      };
+    });
+    exportToExcel(dataToExport, 'entradas_estoque');
+    toast({ title: 'Sucesso', description: 'Arquivo exportado com sucesso!' });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -123,13 +171,13 @@ export default function StockEntry() {
         quantity: parseInt(formData.quantity),
         paymentMethod: formData.paymentMethod,
         installments: parseInt(formData.installments),
+        firstDueDate: formData.firstDueDate,
       });
       
       if (response.success) {
         toast({ title: 'Sucesso', description: response.message });
         fetchData();
         setDialogOpen(false);
-        // Navigate to stock consultation after entry
         navigate('/estoque/consultar');
       }
     } catch (error) {
@@ -163,10 +211,16 @@ export default function StockEntry() {
             Registre a entrada de produtos no estoque
           </p>
         </div>
-        <Button onClick={() => setDialogOpen(true)} className="w-full sm:w-auto">
-          <Plus className="h-4 w-4 mr-2" />
-          Nova Entrada
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={handleExport}>
+            <Download className="h-4 w-4 mr-2" />
+            Exportar Excel
+          </Button>
+          <Button onClick={() => setDialogOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Nova Entrada
+          </Button>
+        </div>
       </div>
 
       {/* Entries Table */}
@@ -194,6 +248,7 @@ export default function StockEntry() {
                   <TableHead>Data Entrada</TableHead>
                   <TableHead>Produto</TableHead>
                   <TableHead>Fornecedor</TableHead>
+                  <TableHead>Unidade</TableHead>
                   <TableHead>Qtd.</TableHead>
                   <TableHead>Valor Total</TableHead>
                   <TableHead>Pagamento</TableHead>
@@ -204,28 +259,32 @@ export default function StockEntry() {
               <TableBody>
                 {filteredEntries.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
                       Nenhuma entrada encontrada
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredEntries.map((entry) => (
-                    <TableRow key={entry.id}>
-                      <TableCell className="font-medium">{entry.orderNumber}</TableCell>
-                      <TableCell>{formatDate(entry.date)}</TableCell>
-                      <TableCell>{entry.productName}</TableCell>
-                      <TableCell>{entry.supplier}</TableCell>
-                      <TableCell>{entry.quantity}</TableCell>
-                      <TableCell>{formatCurrency(entry.totalValue)}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">
-                          {getPaymentMethodLabel(entry.paymentMethod)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>{entry.installments}x</TableCell>
-                      <TableCell>{entry.createdByName}</TableCell>
-                    </TableRow>
-                  ))
+                  filteredEntries.map((entry) => {
+                    const product = getProductInfo(entry.productId);
+                    return (
+                      <TableRow key={entry.id}>
+                        <TableCell className="font-medium">{entry.orderNumber}</TableCell>
+                        <TableCell>{formatDate(entry.date)}</TableCell>
+                        <TableCell>{entry.productName}</TableCell>
+                        <TableCell>{entry.supplier}</TableCell>
+                        <TableCell className="capitalize">{product?.unitType || '-'}</TableCell>
+                        <TableCell>{entry.quantity}</TableCell>
+                        <TableCell>{formatCurrency(entry.totalValue)}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">
+                            {getPaymentMethodLabel(entry.paymentMethod)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>{entry.installments}x</TableCell>
+                        <TableCell>{entry.createdByName}</TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
@@ -235,7 +294,7 @@ export default function StockEntry() {
 
       {/* Create Entry Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Nova Entrada de Estoque</DialogTitle>
           </DialogHeader>
@@ -346,6 +405,19 @@ export default function StockEntry() {
               </div>
             </div>
 
+            {parseInt(formData.installments) >= 1 && formData.paymentMethod && (
+              <div className="space-y-2">
+                <Label htmlFor="firstDueDate">Data do Primeiro Vencimento</Label>
+                <Input
+                  id="firstDueDate"
+                  type="date"
+                  value={formData.firstDueDate}
+                  onChange={(e) => setFormData({ ...formData, firstDueDate: e.target.value })}
+                  required
+                />
+              </div>
+            )}
+
             {calculatedTotal > 0 && (
               <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg space-y-2">
                 <div className="flex justify-between items-center">
@@ -362,6 +434,20 @@ export default function StockEntry() {
                     </span>
                   </div>
                 )}
+              </div>
+            )}
+
+            {parseInt(formData.installments) > 1 && formData.firstDueDate && calculatedTotal > 0 && (
+              <div className="p-3 bg-muted rounded-lg space-y-2">
+                <p className="text-sm font-medium text-foreground">Vencimentos das Parcelas:</p>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  {calculateInstallmentDates().map((inst) => (
+                    <div key={inst.number} className="flex justify-between">
+                      <span className="text-muted-foreground">{inst.number}ª parcela:</span>
+                      <span>{formatDate(inst.date)}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Check, X } from 'lucide-react';
+import { Plus, Search, Check, X, ArrowUpDown, Download } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,6 +31,10 @@ import { useToast } from '@/hooks/use-toast';
 import { getOrders, getProducts, createOrder, approveOrder, rejectOrder, getCurrentUser } from '@/services/api';
 import { Order, Product, User } from '@/types';
 import { formatCurrency, formatDate } from '@/lib/utils';
+import { exportToExcel } from '@/lib/excel';
+
+type SortField = 'date' | 'supplier' | 'totalValue' | 'orderNumber';
+type SortDirection = 'asc' | 'desc';
 
 export default function Orders() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -38,6 +42,9 @@ export default function Orders() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+  const [sortField, setSortField] = useState<SortField>('date');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [formData, setFormData] = useState({
     orderNumber: '',
@@ -80,12 +87,62 @@ export default function Orders() {
     ? selectedProduct.unitCost * parseInt(formData.quantity)
     : 0;
 
-  const filteredOrders = orders.filter(
-    (order) =>
-      order.orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      order.productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      order.supplier.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  const filteredAndSortedOrders = orders
+    .filter((order) => {
+      const matchesSearch = 
+        order.orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        order.productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        order.supplier.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    })
+    .sort((a, b) => {
+      let comparison = 0;
+      switch (sortField) {
+        case 'date':
+          comparison = new Date(a.date).getTime() - new Date(b.date).getTime();
+          break;
+        case 'supplier':
+          comparison = a.supplier.localeCompare(b.supplier);
+          break;
+        case 'totalValue':
+          comparison = a.totalValue - b.totalValue;
+          break;
+        case 'orderNumber':
+          comparison = a.orderNumber.localeCompare(b.orderNumber);
+          break;
+      }
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+
+  const handleExport = () => {
+    const dataToExport = filteredAndSortedOrders.map((order) => {
+      const product = products.find(p => p.id === order.productId);
+      return {
+        'Nº Pedido': order.orderNumber,
+        'Data': formatDate(order.date),
+        'Produto': order.productName,
+        'Fornecedor': order.supplier,
+        'Unidade': product?.unitType || '-',
+        'Quantidade': order.quantity,
+        'Valor Total': order.totalValue,
+        'Solicitante': order.createdByName,
+        'Status': order.status === 'approved' ? 'Aprovado' : order.status === 'pending' ? 'Pendente' : 'Rejeitado',
+        'Aprovador': order.approvedByName || '-',
+      };
+    });
+    exportToExcel(dataToExport, 'pedidos');
+    toast({ title: 'Sucesso', description: 'Arquivo exportado com sucesso!' });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -163,6 +220,18 @@ export default function Orders() {
     }
   };
 
+  const SortButton = ({ field, children }: { field: SortField; children: React.ReactNode }) => (
+    <Button 
+      variant="ghost" 
+      size="sm" 
+      className="h-auto p-0 font-medium hover:bg-transparent"
+      onClick={() => handleSort(field)}
+    >
+      {children}
+      <ArrowUpDown className="ml-1 h-3 w-3" />
+    </Button>
+  );
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -181,25 +250,44 @@ export default function Orders() {
             Gerencie os pedidos de produtos
           </p>
         </div>
-        <Button onClick={() => setDialogOpen(true)} className="w-full sm:w-auto">
-          <Plus className="h-4 w-4 mr-2" />
-          Novo Pedido
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={handleExport}>
+            <Download className="h-4 w-4 mr-2" />
+            Exportar Excel
+          </Button>
+          <Button onClick={() => setDialogOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Novo Pedido
+          </Button>
+        </div>
       </div>
 
       {/* Orders Table */}
       <Card>
         <CardHeader>
-          <div className="flex flex-col sm:flex-row gap-4 sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-4">
             <CardTitle>Lista de Pedidos</CardTitle>
-            <div className="relative w-full sm:w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar pedidos..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9"
-              />
+            <div className="flex flex-col sm:flex-row gap-4">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar pedidos..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  <SelectItem value="pending">Pendente</SelectItem>
+                  <SelectItem value="approved">Aprovado</SelectItem>
+                  <SelectItem value="rejected">Rejeitado</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </CardHeader>
@@ -208,12 +296,13 @@ export default function Orders() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Nº Pedido</TableHead>
-                  <TableHead>Data</TableHead>
+                  <TableHead><SortButton field="orderNumber">Nº Pedido</SortButton></TableHead>
+                  <TableHead><SortButton field="date">Data</SortButton></TableHead>
                   <TableHead>Produto</TableHead>
-                  <TableHead>Fornecedor</TableHead>
+                  <TableHead><SortButton field="supplier">Fornecedor</SortButton></TableHead>
+                  <TableHead>Unidade</TableHead>
                   <TableHead>Qtd.</TableHead>
-                  <TableHead>Valor Total</TableHead>
+                  <TableHead><SortButton field="totalValue">Valor Total</SortButton></TableHead>
                   <TableHead>Solicitante</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Aprovador</TableHead>
@@ -223,50 +312,54 @@ export default function Orders() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredOrders.length === 0 ? (
+                {filteredAndSortedOrders.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={11} className="text-center text-muted-foreground py-8">
                       Nenhum pedido encontrado
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredOrders.map((order) => (
-                    <TableRow key={order.id}>
-                      <TableCell className="font-medium">{order.orderNumber}</TableCell>
-                      <TableCell>{formatDate(order.date)}</TableCell>
-                      <TableCell>{order.productName}</TableCell>
-                      <TableCell>{order.supplier}</TableCell>
-                      <TableCell>{order.quantity}</TableCell>
-                      <TableCell>{formatCurrency(order.totalValue)}</TableCell>
-                      <TableCell>{order.createdByName}</TableCell>
-                      <TableCell>{getStatusBadge(order.status)}</TableCell>
-                      <TableCell>{order.approvedByName || '-'}</TableCell>
-                      {currentUser?.role === 'admin' && (
-                        <TableCell className="text-right">
-                          {order.status === 'pending' && (
-                            <div className="flex justify-end gap-2">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleApprove(order.id)}
-                                className="text-success hover:text-success hover:bg-success/10"
-                              >
-                                <Check className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleReject(order.id)}
-                                className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          )}
-                        </TableCell>
-                      )}
-                    </TableRow>
-                  ))
+                  filteredAndSortedOrders.map((order) => {
+                    const product = products.find(p => p.id === order.productId);
+                    return (
+                      <TableRow key={order.id}>
+                        <TableCell className="font-medium">{order.orderNumber}</TableCell>
+                        <TableCell>{formatDate(order.date)}</TableCell>
+                        <TableCell>{order.productName}</TableCell>
+                        <TableCell>{order.supplier}</TableCell>
+                        <TableCell className="capitalize">{product?.unitType || '-'}</TableCell>
+                        <TableCell>{order.quantity}</TableCell>
+                        <TableCell>{formatCurrency(order.totalValue)}</TableCell>
+                        <TableCell>{order.createdByName}</TableCell>
+                        <TableCell>{getStatusBadge(order.status)}</TableCell>
+                        <TableCell>{order.approvedByName || '-'}</TableCell>
+                        {currentUser?.role === 'admin' && (
+                          <TableCell className="text-right">
+                            {order.status === 'pending' && (
+                              <div className="flex justify-end gap-2">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleApprove(order.id)}
+                                  className="text-success hover:text-success hover:bg-success/10"
+                                >
+                                  <Check className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleReject(order.id)}
+                                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            )}
+                          </TableCell>
+                        )}
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
@@ -324,7 +417,7 @@ export default function Orders() {
             </div>
 
             {selectedProduct && (
-              <div className="grid grid-cols-2 gap-4 p-3 bg-muted rounded-lg">
+              <div className="grid grid-cols-3 gap-4 p-3 bg-muted rounded-lg">
                 <div>
                   <p className="text-xs text-muted-foreground">Fornecedor</p>
                   <p className="font-medium">{selectedProduct.supplier}</p>
@@ -332,6 +425,10 @@ export default function Orders() {
                 <div>
                   <p className="text-xs text-muted-foreground">Custo Unitário</p>
                   <p className="font-medium">{formatCurrency(selectedProduct.unitCost)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Unidade</p>
+                  <p className="font-medium capitalize">{selectedProduct.unitType}</p>
                 </div>
               </div>
             )}
