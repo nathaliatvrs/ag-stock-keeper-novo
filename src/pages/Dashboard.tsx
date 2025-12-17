@@ -1,18 +1,10 @@
-import { useEffect, useState } from 'react';
-import { 
-  Package, 
-  ShoppingCart, 
-  Warehouse, 
-  TrendingUp, 
-  TrendingDown,
-  DollarSign,
-  AlertCircle
-} from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Package, ShoppingCart, TrendingUp, ArrowDownToLine, ArrowUpFromLine, AlertCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { getDashboardStats, getOrders } from '@/services/api';
 import { DashboardStats, Order } from '@/types';
-import { formatCurrency } from '@/lib/utils';
-import { Badge } from '@/components/ui/badge';
+import { formatCurrency, formatDate } from '@/lib/utils';
 
 export default function Dashboard() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -31,6 +23,7 @@ export default function Dashboard() {
           setStats(statsRes.data);
         }
         if (ordersRes.success && ordersRes.data) {
+          // Get last 5 orders
           setRecentOrders(ordersRes.data.slice(-5).reverse());
         }
       } catch (error) {
@@ -43,6 +36,33 @@ export default function Dashboard() {
     fetchData();
   }, []);
 
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'approved':
+        return <Badge className="bg-success text-success-foreground text-xs">Aprovado</Badge>;
+      case 'pending':
+        return <Badge variant="secondary" className="bg-warning text-warning-foreground text-xs">Pendente</Badge>;
+      case 'rejected':
+        return <Badge variant="destructive" className="text-xs">Rejeitado</Badge>;
+      case 'partial':
+        return <Badge variant="outline" className="border-primary text-primary text-xs">Parcial</Badge>;
+      default:
+        return <Badge variant="outline" className="text-xs">{status}</Badge>;
+    }
+  };
+
+  // Helpers para exibir informações do pedido com múltiplos itens
+  const getOrderDisplayName = (order: Order) => {
+    if (order.items.length === 1) {
+      return order.items[0].productName;
+    }
+    return `${order.items[0].productName} +${order.items.length - 1}`;
+  };
+
+  const getTotalQuantity = (order: Order) => {
+    return order.items.reduce((sum, item) => sum + item.quantity, 0);
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -51,149 +71,152 @@ export default function Dashboard() {
     );
   }
 
-  const statCards = [
-    {
-      title: 'Total de Produtos',
-      value: stats?.totalProducts || 0,
-      icon: Package,
-      color: 'text-primary',
-      bgColor: 'bg-primary/10',
-    },
-    {
-      title: 'Pedidos Pendentes',
-      value: stats?.pendingOrders || 0,
-      icon: AlertCircle,
-      color: 'text-warning',
-      bgColor: 'bg-warning/10',
-    },
-    {
-      title: 'Valor em Estoque',
-      value: formatCurrency(stats?.totalStockValue || 0),
-      icon: DollarSign,
-      color: 'text-success',
-      bgColor: 'bg-success/10',
-    },
-    {
-      title: 'Itens no Estoque',
-      value: stats?.stockItemsCount || 0,
-      icon: Warehouse,
-      color: 'text-primary',
-      bgColor: 'bg-primary/10',
-    },
-  ];
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'approved':
-        return <Badge className="bg-success text-success-foreground">Aprovado</Badge>;
-      case 'pending':
-        return <Badge variant="secondary" className="bg-warning text-warning-foreground">Pendente</Badge>;
-      case 'rejected':
-        return <Badge variant="destructive">Rejeitado</Badge>;
-      default:
-        return <Badge variant="outline">{status}</Badge>;
-    }
-  };
-
   return (
-    <div className="space-y-8 animate-fade-in">
-      {/* Header */}
+    <div className="space-y-6 animate-fade-in">
+      {/* Welcome Header */}
       <div>
         <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
         <p className="text-muted-foreground mt-1">
-          Bem-vindo ao Sistema de Estoque da AG Consultoria
+          Visão geral do sistema de estoque
         </p>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {statCards.map((stat, index) => (
-          <Card key={index} className="hover:shadow-lg transition-shadow duration-200">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">{stat.title}</p>
-                  <p className="text-2xl font-bold mt-1">{stat.value}</p>
-                </div>
-                <div className={`p-3 rounded-xl ${stat.bgColor}`}>
-                  <stat.icon className={`h-6 w-6 ${stat.color}`} />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {/* Two Column Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Monthly Summary */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Resumo do Mês</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between p-4 rounded-lg bg-success/5 border border-success/20">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-success/10">
-                  <TrendingUp className="h-5 w-5 text-success" />
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Entradas no Estoque</p>
-                  <p className="font-semibold">{formatCurrency(stats?.monthlyEntries || 0)}</p>
-                </div>
-              </div>
-            </div>
-            
-            <div className="flex items-center justify-between p-4 rounded-lg bg-destructive/5 border border-destructive/20">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-destructive/10">
-                  <TrendingDown className="h-5 w-5 text-destructive" />
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Saídas do Estoque</p>
-                  <p className="font-semibold">{formatCurrency(stats?.monthlyExits || 0)}</p>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Recent Orders */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Pedidos Recentes</CardTitle>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <Card className="hover:shadow-lg transition-shadow">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Total de Produtos
+            </CardTitle>
+            <Package className="h-5 w-5 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              {recentOrders.length === 0 ? (
-                <p className="text-muted-foreground text-center py-4">
-                  Nenhum pedido encontrado
-                </p>
-              ) : (
-                recentOrders.map((order) => (
-                  <div 
-                    key={order.id}
-                    className="flex items-center justify-between p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{order.productName}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {order.orderNumber} • {order.quantity} {order.quantity === 1 ? 'unidade' : 'unidades'}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-medium hidden sm:block">
-                        {formatCurrency(order.totalValue)}
-                      </span>
-                      {getStatusBadge(order.status)}
-                    </div>
-                  </div>
-                ))
-              )}
+            <div className="text-3xl font-bold text-foreground">{stats?.totalProducts || 0}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Produtos cadastrados
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="hover:shadow-lg transition-shadow">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Pedidos Pendentes
+            </CardTitle>
+            <AlertCircle className="h-5 w-5 text-warning" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-warning">{stats?.pendingOrders || 0}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Aguardando aprovação
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="hover:shadow-lg transition-shadow">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Valor em Estoque
+            </CardTitle>
+            <TrendingUp className="h-5 w-5 text-success" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-success">
+              {formatCurrency(stats?.totalStockValue || 0)}
             </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {stats?.stockItemsCount || 0} itens disponíveis
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="hover:shadow-lg transition-shadow">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Itens em Estoque
+            </CardTitle>
+            <ShoppingCart className="h-5 w-5 text-primary" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-foreground">{stats?.stockItemsCount || 0}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Unidades disponíveis
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="hover:shadow-lg transition-shadow">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Entradas do Mês
+            </CardTitle>
+            <ArrowDownToLine className="h-5 w-5 text-success" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-success">
+              {formatCurrency(stats?.monthlyEntries || 0)}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Valor total de entradas
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="hover:shadow-lg transition-shadow">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Saídas do Mês
+            </CardTitle>
+            <ArrowUpFromLine className="h-5 w-5 text-destructive" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-destructive">
+              {formatCurrency(stats?.monthlyExits || 0)}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Valor total de saídas
+            </p>
           </CardContent>
         </Card>
       </div>
+
+      {/* Recent Orders */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Últimos Pedidos</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3">
+            {recentOrders.length === 0 ? (
+              <p className="text-center text-muted-foreground py-4">
+                Nenhum pedido encontrado
+              </p>
+            ) : (
+              recentOrders.map((order) => (
+                <div 
+                  key={order.id}
+                  className="flex items-center justify-between p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors"
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium truncate" title={order.items.map(i => i.productName).join(', ')}>
+                      {getOrderDisplayName(order)}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      {order.orderNumber} • {getTotalQuantity(order)} {getTotalQuantity(order) === 1 ? 'unidade' : 'unidades'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-medium hidden sm:block">
+                      {formatCurrency(order.totalValue)}
+                    </span>
+                    {getStatusBadge(order.status)}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

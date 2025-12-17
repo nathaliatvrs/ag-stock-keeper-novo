@@ -22,20 +22,28 @@
  * - PUT /products/:id - Atualiza produto
  * - DELETE /products/:id - Remove produto
  * 
- * PEDIDOS:
+ * PEDIDOS (novo formato com múltiplos produtos):
  * - GET /orders - Lista todos os pedidos
  * - GET /orders/:id - Busca pedido por ID
- * - POST /orders - Cria novo pedido
+ * - POST /orders - Cria novo pedido com múltiplos itens
+ *   Body: { orderNumber, date, items: [{ productId, quantity }] }
  * - PUT /orders/:id - Atualiza pedido
- * - PUT /orders/:id/approve - Aprova pedido (admin only)
- * - PUT /orders/:id/reject - Rejeita pedido (admin only)
+ * - PUT /orders/:id/approve-all - Aprova todos os itens do pedido
+ * - PUT /orders/:id/items/:itemId/approve - Aprova item individual
+ * - PUT /orders/:id/items/:itemId/reject - Rejeita item individual
+ * - PUT /orders/:id/reject - Rejeita pedido inteiro
  * 
- * ENTRADA DE ESTOQUE:
+ * ENTRADA DE ESTOQUE (com múltiplas NFs):
  * - GET /stock-entries - Lista todas as entradas
  * - GET /stock-entries/:id - Busca entrada por ID
- * - POST /stock-entries - Cria nova entrada (gera StockItems e PaymentInstallments automaticamente)
- *   Body: { orderId, date, quantity, paymentMethod, installments, firstDueDate, customTotalValue? }
- *   - customTotalValue: Valor total opcional para sobrescrever o cálculo automático (quando preço muda)
+ * - POST /stock-entries - Cria nova entrada com NFs
+ *   Body: { 
+ *     orderId, date, paymentMethod, installments, firstDueDate,
+ *     invoices: [{ 
+ *       invoiceNumber, 
+ *       items: [{ orderItemId, quantity, adjustedUnitCost }] 
+ *     }]
+ *   }
  * 
  * ITENS DE ESTOQUE (view explodida):
  * - GET /stock-items - Lista todos os itens
@@ -60,7 +68,10 @@
 import { 
   Product, 
   Order, 
+  OrderItem,
   StockEntry, 
+  StockEntryInvoice,
+  StockEntryInvoiceItem,
   StockItem, 
   StockExit,
   PaymentInstallment,
@@ -77,7 +88,6 @@ import {
   mockStockItems,
   mockStockExits,
   mockInstallments,
-  mockDashboardStats,
   currentUser,
   adminUser,
 } from './mockData';
@@ -89,16 +99,13 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const getCurrentUser = async (): Promise<ApiResponse<User>> => {
   await delay(300);
-  // Toggle between user and admin for testing
   const isAdmin = localStorage.getItem('isAdmin') === 'true';
   return { success: true, data: isAdmin ? adminUser : currentUser };
 };
 
 export const login = async (email: string, password: string): Promise<ApiResponse<User>> => {
   await delay(500);
-  // Mock login - replace with actual API call
   if (email && password) {
-    // Admin if email contains 'admin' or is the specific admin email
     const isAdmin = email.toLowerCase().includes('admin') || email.toLowerCase() === 'admin@agconsultoria.com.br';
     localStorage.setItem('isAdmin', String(isAdmin));
     return { success: true, data: isAdmin ? adminUser : currentUser };
@@ -176,72 +183,171 @@ export const getOrderById = async (id: string): Promise<ApiResponse<Order>> => {
   return { success: false, error: 'Pedido não encontrado' };
 };
 
+// Criar pedido com múltiplos produtos
 export const createOrder = async (orderData: {
   orderNumber: string;
   date: string;
-  productId: string;
-  quantity: number;
+  items: { productId: string; quantity: number }[];
 }): Promise<ApiResponse<Order>> => {
   await delay(400);
-  const product = products.find(p => p.id === orderData.productId);
-  if (!product) {
-    return { success: false, error: 'Produto não encontrado' };
+  
+  const user = await getCurrentUser();
+  const orderItems: OrderItem[] = [];
+  let totalValue = 0;
+  
+  for (const item of orderData.items) {
+    const product = products.find(p => p.id === item.productId);
+    if (!product) {
+      return { success: false, error: `Produto ${item.productId} não encontrado` };
+    }
+    
+    const itemTotal = product.unitCost * item.quantity;
+    totalValue += itemTotal;
+    
+    orderItems.push({
+      id: `order-item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      productId: product.id,
+      productName: product.name,
+      supplier: product.supplier,
+      unitCost: product.unitCost,
+      quantity: item.quantity,
+      totalValue: itemTotal,
+      status: 'pending',
+      approvedBy: null,
+      approvedByName: null,
+    });
   }
 
-  const user = await getCurrentUser();
   const newOrder: Order = {
     id: `order-${Date.now()}`,
     orderNumber: orderData.orderNumber,
     date: orderData.date,
-    productId: orderData.productId,
-    productName: product.name,
-    supplier: product.supplier,
-    unitCost: product.unitCost,
-    quantity: orderData.quantity,
-    totalValue: product.unitCost * orderData.quantity,
+    items: orderItems,
+    totalValue,
     createdBy: user.data?.id || '',
     createdByName: user.data?.name || '',
-    approvedBy: null,
-    approvedByName: null,
     status: 'pending',
     createdAt: new Date().toISOString(),
   };
+  
   orders = [...orders, newOrder];
   return { success: true, data: newOrder, message: 'Pedido criado com sucesso!' };
 };
 
+// Aprovar todos os itens do pedido
 export const approveOrder = async (id: string): Promise<ApiResponse<Order>> => {
   await delay(400);
   const index = orders.findIndex(o => o.id === id);
   if (index === -1) {
     return { success: false, error: 'Pedido não encontrado' };
   }
-  orders[index] = { 
-    ...orders[index], 
-    status: 'approved',
+  
+  const updatedItems = orders[index].items.map(item => ({
+    ...item,
+    status: 'approved' as const,
     approvedBy: adminUser.id,
     approvedByName: adminUser.name,
+  }));
+  
+  orders[index] = { 
+    ...orders[index], 
+    items: updatedItems,
+    status: 'approved',
   };
   return { success: true, data: orders[index], message: 'Pedido aprovado!' };
 };
 
+// Aprovar item individual
+export const approveOrderItem = async (orderId: string, itemId: string): Promise<ApiResponse<Order>> => {
+  await delay(400);
+  const orderIndex = orders.findIndex(o => o.id === orderId);
+  if (orderIndex === -1) {
+    return { success: false, error: 'Pedido não encontrado' };
+  }
+  
+  const updatedItems = orders[orderIndex].items.map(item => 
+    item.id === itemId 
+      ? { ...item, status: 'approved' as const, approvedBy: adminUser.id, approvedByName: adminUser.name }
+      : item
+  );
+  
+  // Determina status do pedido
+  const allApproved = updatedItems.every(item => item.status === 'approved');
+  const allRejected = updatedItems.every(item => item.status === 'rejected');
+  const hasApproved = updatedItems.some(item => item.status === 'approved');
+  
+  let orderStatus: 'pending' | 'approved' | 'rejected' | 'partial' = 'pending';
+  if (allApproved) orderStatus = 'approved';
+  else if (allRejected) orderStatus = 'rejected';
+  else if (hasApproved) orderStatus = 'partial';
+  
+  orders[orderIndex] = { 
+    ...orders[orderIndex], 
+    items: updatedItems,
+    status: orderStatus,
+  };
+  return { success: true, data: orders[orderIndex], message: 'Item aprovado!' };
+};
+
+// Rejeitar item individual
+export const rejectOrderItem = async (orderId: string, itemId: string): Promise<ApiResponse<Order>> => {
+  await delay(400);
+  const orderIndex = orders.findIndex(o => o.id === orderId);
+  if (orderIndex === -1) {
+    return { success: false, error: 'Pedido não encontrado' };
+  }
+  
+  const updatedItems = orders[orderIndex].items.map(item => 
+    item.id === itemId 
+      ? { ...item, status: 'rejected' as const }
+      : item
+  );
+  
+  const allApproved = updatedItems.every(item => item.status === 'approved');
+  const allRejected = updatedItems.every(item => item.status === 'rejected');
+  const hasApproved = updatedItems.some(item => item.status === 'approved');
+  
+  let orderStatus: 'pending' | 'approved' | 'rejected' | 'partial' = 'pending';
+  if (allApproved) orderStatus = 'approved';
+  else if (allRejected) orderStatus = 'rejected';
+  else if (hasApproved) orderStatus = 'partial';
+  
+  orders[orderIndex] = { 
+    ...orders[orderIndex], 
+    items: updatedItems,
+    status: orderStatus,
+  };
+  return { success: true, data: orders[orderIndex], message: 'Item rejeitado!' };
+};
+
+// Rejeitar pedido inteiro
 export const rejectOrder = async (id: string): Promise<ApiResponse<Order>> => {
   await delay(400);
   const index = orders.findIndex(o => o.id === id);
   if (index === -1) {
     return { success: false, error: 'Pedido não encontrado' };
   }
-  orders[index] = { ...orders[index], status: 'rejected' };
+  
+  const updatedItems = orders[index].items.map(item => ({
+    ...item,
+    status: 'rejected' as const,
+  }));
+  
+  orders[index] = { 
+    ...orders[index], 
+    items: updatedItems,
+    status: 'rejected',
+  };
   return { success: true, data: orders[index], message: 'Pedido rejeitado!' };
 };
 
+// Atualizar pedido
 export const updateOrder = async (
   id: string,
   orderData: {
     orderNumber: string;
     date: string;
-    productId: string;
-    quantity: number;
+    items: { productId: string; quantity: number }[];
   },
   isAdmin: boolean
 ): Promise<ApiResponse<Order>> => {
@@ -251,32 +357,54 @@ export const updateOrder = async (
     return { success: false, error: 'Pedido não encontrado' };
   }
   
-  const product = products.find(p => p.id === orderData.productId);
-  if (!product) {
-    return { success: false, error: 'Produto não encontrado' };
-  }
-
-  const user = await getCurrentUser();
+  const orderItems: OrderItem[] = [];
+  let totalValue = 0;
   
-  // Se não for admin, volta para pendente
-  // Se for admin, mantém o status atual
-  const newStatus = isAdmin ? orders[index].status : 'pending';
-  const newApprovedBy = isAdmin ? orders[index].approvedBy : null;
-  const newApprovedByName = isAdmin ? orders[index].approvedByName : null;
+  for (const item of orderData.items) {
+    const product = products.find(p => p.id === item.productId);
+    if (!product) {
+      return { success: false, error: `Produto ${item.productId} não encontrado` };
+    }
+    
+    const itemTotal = product.unitCost * item.quantity;
+    totalValue += itemTotal;
+    
+    // Se admin, mantém status; se não, volta para pending
+    const existingItem = orders[index].items.find(i => i.productId === item.productId);
+    const itemStatus = isAdmin && existingItem ? existingItem.status : 'pending';
+    const approvedBy = isAdmin && existingItem ? existingItem.approvedBy : null;
+    const approvedByName = isAdmin && existingItem ? existingItem.approvedByName : null;
+    
+    orderItems.push({
+      id: existingItem?.id || `order-item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      productId: product.id,
+      productName: product.name,
+      supplier: product.supplier,
+      unitCost: product.unitCost,
+      quantity: item.quantity,
+      totalValue: itemTotal,
+      status: itemStatus,
+      approvedBy,
+      approvedByName,
+    });
+  }
+  
+  const allApproved = orderItems.every(item => item.status === 'approved');
+  const allRejected = orderItems.every(item => item.status === 'rejected');
+  const hasApproved = orderItems.some(item => item.status === 'approved');
+  
+  let orderStatus: 'pending' | 'approved' | 'rejected' | 'partial' = 'pending';
+  if (allApproved) orderStatus = 'approved';
+  else if (allRejected) orderStatus = 'rejected';
+  else if (hasApproved) orderStatus = 'partial';
   
   orders[index] = {
     ...orders[index],
     orderNumber: orderData.orderNumber,
     date: orderData.date,
-    productId: orderData.productId,
-    productName: product.name,
-    supplier: product.supplier,
-    unitCost: product.unitCost,
-    quantity: orderData.quantity,
-    totalValue: product.unitCost * orderData.quantity,
-    status: newStatus,
-    approvedBy: newApprovedBy,
-    approvedByName: newApprovedByName,
+    items: orderItems,
+    totalValue,
+    status: orderStatus,
   };
   
   const message = isAdmin 
@@ -296,14 +424,21 @@ export const getStockEntries = async (): Promise<ApiResponse<StockEntry[]>> => {
   return { success: true, data: stockEntries };
 };
 
+// Criar entrada com múltiplas NFs
 export const createStockEntry = async (entryData: {
   orderId: string;
   date: string;
-  quantity: number;
   paymentMethod: PaymentMethod;
   installments: number;
   firstDueDate: string;
-  customTotalValue?: number; // Valor total editável
+  invoices: {
+    invoiceNumber: string;
+    items: {
+      orderItemId: string;
+      quantity: number;
+      adjustedUnitCost: number;
+    }[];
+  }[];
 }): Promise<ApiResponse<StockEntry>> => {
   await delay(500);
   
@@ -313,20 +448,47 @@ export const createStockEntry = async (entryData: {
   }
 
   const user = await getCurrentUser();
-  // Usa valor customizado se fornecido, senão calcula baseado no pedido
-  const totalValue = entryData.customTotalValue ?? (order.unitCost * entryData.quantity);
-  const effectiveUnitCost = totalValue / entryData.quantity;
+  let totalQuantity = 0;
+  let totalValue = 0;
+  
+  const invoices: StockEntryInvoice[] = entryData.invoices.map(inv => {
+    const invoiceItems: StockEntryInvoiceItem[] = inv.items.map(item => {
+      const orderItem = order.items.find(oi => oi.id === item.orderItemId);
+      if (!orderItem) throw new Error('Item do pedido não encontrado');
+      
+      const itemTotal = item.adjustedUnitCost * item.quantity;
+      totalQuantity += item.quantity;
+      totalValue += itemTotal;
+      
+      return {
+        id: `inv-item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        orderItemId: item.orderItemId,
+        productId: orderItem.productId,
+        productName: orderItem.productName,
+        supplier: orderItem.supplier,
+        quantity: item.quantity,
+        originalUnitCost: orderItem.unitCost,
+        adjustedUnitCost: item.adjustedUnitCost,
+        totalValue: itemTotal,
+      };
+    });
+    
+    return {
+      id: `invoice-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      invoiceNumber: inv.invoiceNumber,
+      items: invoiceItems,
+      totalValue: invoiceItems.reduce((sum, item) => sum + item.totalValue, 0),
+    };
+  });
+
   const newEntry: StockEntry = {
     id: `entry-${Date.now()}`,
     date: entryData.date,
     orderId: order.id,
     orderNumber: order.orderNumber,
-    productId: order.productId,
-    productName: order.productName,
-    supplier: order.supplier,
-    quantity: entryData.quantity,
-    unitCost: effectiveUnitCost,
-    totalValue: totalValue,
+    invoices,
+    totalQuantity,
+    totalValue,
     paymentMethod: entryData.paymentMethod,
     installments: entryData.installments,
     createdBy: user.data?.id || '',
@@ -354,21 +516,26 @@ export const createStockEntry = async (entryData: {
   });
   addInstallments(newInstallments);
   
-  // Create individual stock items (exploded view) - usa custo efetivo
-  const newItems: StockItem[] = Array.from({ length: entryData.quantity }, (_, i) => ({
-    id: `item-${Date.now()}-${i}`,
-    stockEntryId: newEntry.id,
-    productId: order.productId,
-    productName: order.productName,
-    supplier: order.supplier,
-    unitCost: effectiveUnitCost,
-    entryDate: entryData.date,
-    exitDate: null,
-    status: 'available' as const,
-    exitId: null,
-  }));
-  
-  stockItems = [...stockItems, ...newItems];
+  // Create individual stock items (exploded view)
+  for (const invoice of invoices) {
+    for (const invItem of invoice.items) {
+      const newItems: StockItem[] = Array.from({ length: invItem.quantity }, (_, i) => ({
+        id: `item-${Date.now()}-${invItem.productId}-${i}-${Math.random().toString(36).substr(2, 9)}`,
+        stockEntryId: newEntry.id,
+        invoiceNumber: invoice.invoiceNumber,
+        productId: invItem.productId,
+        productName: invItem.productName,
+        supplier: invItem.supplier,
+        unitCost: invItem.adjustedUnitCost,
+        entryDate: entryData.date,
+        exitDate: null,
+        status: 'available' as const,
+        exitId: null,
+      }));
+      
+      stockItems = [...stockItems, ...newItems];
+    }
+  }
   
   return { success: true, data: newEntry, message: 'Entrada de estoque registrada!' };
 };
@@ -434,7 +601,7 @@ export const createStockExit = async (exitData: {
   
   stockExits = [...stockExits, newExit];
   
-  // Update stock items status and exit date
+  // Update stock items status
   stockItems = stockItems.map(item => 
     exitData.stockItemIds.includes(item.id) 
       ? { ...item, status: 'exited' as const, exitId: newExit.id, exitDate: exitData.exitDate }
@@ -483,7 +650,7 @@ export const getDashboardStats = async (): Promise<ApiResponse<DashboardStats>> 
   const availableItems = stockItems.filter(item => item.status === 'available');
   const stats: DashboardStats = {
     totalProducts: products.length,
-    pendingOrders: orders.filter(o => o.status === 'pending').length,
+    pendingOrders: orders.filter(o => o.status === 'pending' || o.status === 'partial').length,
     totalStockValue: availableItems.reduce((sum, item) => sum + item.unitCost, 0),
     stockItemsCount: availableItems.length,
     monthlyEntries: stockEntries.reduce((sum, entry) => sum + entry.totalValue, 0),

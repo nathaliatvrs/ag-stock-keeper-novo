@@ -64,8 +64,22 @@ export default function OrderPayments() {
     return entries.find((e) => e.id === stockEntryId);
   };
 
-  const getProductInfo = (productId: string) => {
-    return products.find((p) => p.id === productId);
+  // Helper para extrair informações dos produtos de uma entrada
+  const getEntryProductsInfo = (entry: StockEntryType) => {
+    const productNames: string[] = [];
+    const suppliers = new Set<string>();
+    
+    entry.invoices.forEach(invoice => {
+      invoice.items.forEach(item => {
+        productNames.push(item.productName);
+        suppliers.add(item.supplier);
+      });
+    });
+    
+    return {
+      productNames: productNames.join(', '),
+      suppliers: Array.from(suppliers).join(', '),
+    };
   };
 
   const isOverdue = (dueDate: string) => {
@@ -74,9 +88,12 @@ export default function OrderPayments() {
 
   const filteredInstallments = installments.filter((inst) => {
     const entry = getEntryInfo(inst.stockEntryId);
+    if (!entry) return false;
+    
+    const entryInfo = getEntryProductsInfo(entry);
     const matchesSearch = 
-      entry?.orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      entry?.productName.toLowerCase().includes(searchTerm.toLowerCase());
+      entry.orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      entryInfo.productNames.toLowerCase().includes(searchTerm.toLowerCase());
     
     const isPaid = inst.paidAt !== null;
     const matchesStatus = 
@@ -98,12 +115,11 @@ export default function OrderPayments() {
   const handleExport = () => {
     const dataToExport = filteredInstallments.map((inst) => {
       const entry = getEntryInfo(inst.stockEntryId);
-      const product = entry ? getProductInfo(entry.productId) : null;
+      const entryInfo = entry ? getEntryProductsInfo(entry) : { productNames: '-', suppliers: '-' };
       return {
         'Nº Pedido': entry?.orderNumber || '-',
-        'Produto': entry?.productName || '-',
-        'Fornecedor': entry?.supplier || '-',
-        'Unidade': product?.unitType || '-',
+        'Produtos': entryInfo.productNames,
+        'Fornecedores': entryInfo.suppliers,
         'Parcela': `${inst.installmentNumber}/${entry?.installments || '-'}`,
         'Valor': inst.value,
         'Vencimento': formatDate(inst.dueDate),
@@ -209,9 +225,9 @@ export default function OrderPayments() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Nº Pedido</TableHead>
-                  <TableHead>Produto</TableHead>
-                  <TableHead>Fornecedor</TableHead>
-                  <TableHead>Unidade</TableHead>
+                  <TableHead>Produtos</TableHead>
+                  <TableHead>Fornecedores</TableHead>
+                  <TableHead>NFs</TableHead>
                   <TableHead>Parcela</TableHead>
                   <TableHead>Valor</TableHead>
                   <TableHead>Vencimento</TableHead>
@@ -228,16 +244,23 @@ export default function OrderPayments() {
                 ) : (
                   filteredInstallments.map((inst) => {
                     const entry = getEntryInfo(inst.stockEntryId);
-                    const product = entry ? getProductInfo(entry.productId) : null;
+                    const entryInfo = entry ? getEntryProductsInfo(entry) : { productNames: '-', suppliers: '-' };
+                    const invoiceNumbers = entry?.invoices.map(inv => inv.invoiceNumber).join(', ') || '-';
                     const isPaid = inst.paidAt !== null;
                     const overdue = !isPaid && isOverdue(inst.dueDate);
 
                     return (
                       <TableRow key={inst.id} className={overdue ? 'bg-destructive/5' : ''}>
                         <TableCell className="font-medium">{entry?.orderNumber || '-'}</TableCell>
-                        <TableCell>{entry?.productName || '-'}</TableCell>
-                        <TableCell>{entry?.supplier || '-'}</TableCell>
-                        <TableCell className="capitalize">{product?.unitType || '-'}</TableCell>
+                        <TableCell className="max-w-[200px] truncate" title={entryInfo.productNames}>
+                          {entryInfo.productNames}
+                        </TableCell>
+                        <TableCell className="max-w-[150px] truncate" title={entryInfo.suppliers}>
+                          {entryInfo.suppliers}
+                        </TableCell>
+                        <TableCell className="max-w-[100px] truncate" title={invoiceNumbers}>
+                          {invoiceNumbers}
+                        </TableCell>
                         <TableCell>{inst.installmentNumber}/{entry?.installments || '-'}</TableCell>
                         <TableCell>{formatCurrency(inst.value)}</TableCell>
                         <TableCell>{formatDate(inst.dueDate)}</TableCell>

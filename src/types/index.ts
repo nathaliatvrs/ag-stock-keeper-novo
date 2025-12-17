@@ -20,9 +20,38 @@ export interface Product {
   updatedAt: string;
 }
 
-export type OrderStatus = 'pending' | 'approved' | 'rejected';
+export type OrderItemStatus = 'pending' | 'approved' | 'rejected';
+
+// Item individual dentro de um pedido (múltiplos produtos por pedido)
+export interface OrderItem {
+  id: string;
+  productId: string;
+  productName: string;
+  supplier: string;
+  unitCost: number;
+  quantity: number;
+  totalValue: number;
+  status: OrderItemStatus;
+  approvedBy: string | null;
+  approvedByName: string | null;
+}
+
+export type OrderStatus = 'pending' | 'approved' | 'rejected' | 'partial';
 
 export interface Order {
+  id: string;
+  orderNumber: string;
+  date: string;
+  items: OrderItem[]; // Múltiplos produtos
+  totalValue: number;
+  createdBy: string;
+  createdByName: string;
+  status: OrderStatus; // partial = alguns itens aprovados
+  createdAt: string;
+}
+
+// Legacy single-product order (for backwards compatibility during migration)
+export interface LegacyOrder {
   id: string;
   orderNumber: string;
   date: string;
@@ -36,7 +65,7 @@ export interface Order {
   createdByName: string;
   approvedBy: string | null;
   approvedByName: string | null;
-  status: OrderStatus;
+  status: 'pending' | 'approved' | 'rejected';
   createdAt: string;
 }
 
@@ -51,7 +80,46 @@ export interface PaymentInstallment {
   paidAt: string | null;
 }
 
+// Item dentro de uma NF na entrada de estoque
+export interface StockEntryInvoiceItem {
+  id: string;
+  orderItemId: string; // Referência ao item do pedido
+  productId: string;
+  productName: string;
+  supplier: string;
+  quantity: number;
+  originalUnitCost: number; // Custo original do pedido
+  adjustedUnitCost: number; // Custo ajustado (editável)
+  totalValue: number;
+}
+
+// NF dentro de uma entrada de estoque
+export interface StockEntryInvoice {
+  id: string;
+  invoiceNumber: string; // Número da NF
+  items: StockEntryInvoiceItem[];
+  totalValue: number;
+}
+
 export interface StockEntry {
+  id: string;
+  date: string;
+  orderId: string;
+  orderNumber: string;
+  invoices: StockEntryInvoice[]; // Múltiplas NFs
+  totalQuantity: number;
+  totalValue: number;
+  paymentMethod: PaymentMethod;
+  installments: number;
+  createdBy: string;
+  createdByName: string;
+  approvedBy: string | null;
+  approvedByName: string | null;
+  createdAt: string;
+}
+
+// Legacy single-product stock entry (for backwards compatibility)
+export interface LegacyStockEntry {
   id: string;
   date: string;
   orderId: string;
@@ -74,6 +142,7 @@ export interface StockEntry {
 export interface StockItem {
   id: string;
   stockEntryId: string;
+  invoiceNumber: string; // NF associada
   productId: string;
   productName: string;
   supplier: string;

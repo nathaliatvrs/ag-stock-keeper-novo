@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Check, X, ArrowUpDown, Download, Pencil } from 'lucide-react';
+import { Plus, Search, Check, X, ArrowUpDown, Download, Pencil, ChevronDown, ChevronRight, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,29 +29,36 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
-import { getOrders, getProducts, createOrder, approveOrder, rejectOrder, updateOrder } from '@/services/api';
-import { Order, Product } from '@/types';
+import { getOrders, getProducts, createOrder, approveOrder, rejectOrder, updateOrder, approveOrderItem, rejectOrderItem } from '@/services/api';
+import { Order, Product, OrderItem } from '@/types';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { exportToExcel } from '@/lib/excel';
 
-type SortField = 'date' | 'supplier' | 'totalValue' | 'orderNumber';
+type SortField = 'date' | 'totalValue' | 'orderNumber';
 type SortDirection = 'asc' | 'desc';
+
+interface OrderFormItem {
+  productId: string;
+  quantity: string;
+}
+
+const MAX_ITEMS_PER_ORDER = 50;
 
 export default function Orders() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'partial'>('all');
   const [sortField, setSortField] = useState<SortField>('date');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+  const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
   const [formData, setFormData] = useState({
     orderNumber: '',
     date: new Date().toISOString().split('T')[0],
-    productId: '',
-    quantity: '',
+    items: [{ productId: '', quantity: '' }] as OrderFormItem[],
   });
   const { toast } = useToast();
   const { isAdmin } = useAuth();
@@ -80,10 +87,15 @@ export default function Orders() {
     fetchData();
   }, []);
 
-  const selectedProduct = products.find((p) => p.id === formData.productId);
-  const calculatedTotal = selectedProduct && formData.quantity 
-    ? selectedProduct.unitCost * parseInt(formData.quantity)
-    : 0;
+  const calculateTotal = () => {
+    return formData.items.reduce((total, item) => {
+      const product = products.find(p => p.id === item.productId);
+      if (product && item.quantity) {
+        return total + (product.unitCost * parseInt(item.quantity));
+      }
+      return total;
+    }, 0);
+  };
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -98,8 +110,10 @@ export default function Orders() {
     .filter((order) => {
       const matchesSearch = 
         order.orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.supplier.toLowerCase().includes(searchTerm.toLowerCase());
+        order.items.some(item => 
+          item.productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          item.supplier.toLowerCase().includes(searchTerm.toLowerCase())
+        );
       const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
       return matchesSearch && matchesStatus;
     })
@@ -108,9 +122,6 @@ export default function Orders() {
       switch (sortField) {
         case 'date':
           comparison = new Date(a.date).getTime() - new Date(b.date).getTime();
-          break;
-        case 'supplier':
-          comparison = a.supplier.localeCompare(b.supplier);
           break;
         case 'totalValue':
           comparison = a.totalValue - b.totalValue;
@@ -123,23 +134,36 @@ export default function Orders() {
     });
 
   const handleExport = () => {
-    const dataToExport = filteredAndSortedOrders.map((order) => {
-      const product = products.find(p => p.id === order.productId);
-      return {
-        'Nº Pedido': order.orderNumber,
-        'Data': formatDate(order.date),
-        'Produto': order.productName,
-        'Fornecedor': order.supplier,
-        'Unidade': product?.unitType || '-',
-        'Quantidade': order.quantity,
-        'Valor Total': order.totalValue,
-        'Solicitante': order.createdByName,
-        'Status': order.status === 'approved' ? 'Aprovado' : order.status === 'pending' ? 'Pendente' : 'Rejeitado',
-        'Aprovador': order.approvedByName || '-',
-      };
+    const dataToExport: any[] = [];
+    filteredAndSortedOrders.forEach((order) => {
+      order.items.forEach((item) => {
+        const product = products.find(p => p.id === item.productId);
+        dataToExport.push({
+          'Nº Pedido': order.orderNumber,
+          'Data': formatDate(order.date),
+          'Produto': item.productName,
+          'Fornecedor': item.supplier,
+          'Unidade': product?.unitType || '-',
+          'Quantidade': item.quantity,
+          'Valor Item': item.totalValue,
+          'Status Item': item.status === 'approved' ? 'Aprovado' : item.status === 'pending' ? 'Pendente' : 'Rejeitado',
+          'Solicitante': order.createdByName,
+          'Status Pedido': getStatusLabel(order.status),
+        });
+      });
     });
     exportToExcel(dataToExport, 'pedidos');
     toast({ title: 'Sucesso', description: 'Arquivo exportado com sucesso!' });
+  };
+
+  const getStatusLabel = (status: string) => {
+    switch (status) {
+      case 'approved': return 'Aprovado';
+      case 'pending': return 'Pendente';
+      case 'rejected': return 'Rejeitado';
+      case 'partial': return 'Parcial';
+      default: return status;
+    }
   };
 
   const handleOpenDialog = (order?: Order) => {
@@ -148,16 +172,17 @@ export default function Orders() {
       setFormData({
         orderNumber: order.orderNumber,
         date: order.date,
-        productId: order.productId,
-        quantity: order.quantity.toString(),
+        items: order.items.map(item => ({
+          productId: item.productId,
+          quantity: item.quantity.toString(),
+        })),
       });
     } else {
       setEditingOrder(null);
       setFormData({
         orderNumber: '',
         date: new Date().toISOString().split('T')[0],
-        productId: '',
-        quantity: '',
+        items: [{ productId: '', quantity: '' }],
       });
     }
     setDialogOpen(true);
@@ -169,20 +194,53 @@ export default function Orders() {
     setFormData({
       orderNumber: '',
       date: new Date().toISOString().split('T')[0],
-      productId: '',
-      quantity: '',
+      items: [{ productId: '', quantity: '' }],
     });
+  };
+
+  const handleAddItem = () => {
+    if (formData.items.length < MAX_ITEMS_PER_ORDER) {
+      setFormData({
+        ...formData,
+        items: [...formData.items, { productId: '', quantity: '' }],
+      });
+    }
+  };
+
+  const handleRemoveItem = (index: number) => {
+    if (formData.items.length > 1) {
+      const newItems = formData.items.filter((_, i) => i !== index);
+      setFormData({ ...formData, items: newItems });
+    }
+  };
+
+  const handleItemChange = (index: number, field: 'productId' | 'quantity', value: string) => {
+    const newItems = [...formData.items];
+    newItems[index] = { ...newItems[index], [field]: value };
+    setFormData({ ...formData, items: newItems });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    const validItems = formData.items.filter(item => item.productId && item.quantity);
+    if (validItems.length === 0) {
+      toast({
+        title: 'Erro',
+        description: 'Adicione pelo menos um produto ao pedido.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     try {
       const orderPayload = {
         orderNumber: formData.orderNumber,
         date: formData.date,
-        productId: formData.productId,
-        quantity: parseInt(formData.quantity),
+        items: validItems.map(item => ({
+          productId: item.productId,
+          quantity: parseInt(item.quantity),
+        })),
       };
 
       let response;
@@ -206,7 +264,7 @@ export default function Orders() {
     }
   };
 
-  const handleApprove = async (orderId: string) => {
+  const handleApproveAll = async (orderId: string) => {
     try {
       const response = await approveOrder(orderId);
       if (response.success) {
@@ -214,15 +272,11 @@ export default function Orders() {
         fetchData();
       }
     } catch (error) {
-      toast({
-        title: 'Erro',
-        description: 'Não foi possível aprovar o pedido.',
-        variant: 'destructive',
-      });
+      toast({ title: 'Erro', description: 'Não foi possível aprovar o pedido.', variant: 'destructive' });
     }
   };
 
-  const handleReject = async (orderId: string) => {
+  const handleRejectAll = async (orderId: string) => {
     try {
       const response = await rejectOrder(orderId);
       if (response.success) {
@@ -230,12 +284,42 @@ export default function Orders() {
         fetchData();
       }
     } catch (error) {
-      toast({
-        title: 'Erro',
-        description: 'Não foi possível rejeitar o pedido.',
-        variant: 'destructive',
-      });
+      toast({ title: 'Erro', description: 'Não foi possível rejeitar o pedido.', variant: 'destructive' });
     }
+  };
+
+  const handleApproveItem = async (orderId: string, itemId: string) => {
+    try {
+      const response = await approveOrderItem(orderId, itemId);
+      if (response.success) {
+        toast({ title: 'Sucesso', description: response.message });
+        fetchData();
+      }
+    } catch (error) {
+      toast({ title: 'Erro', description: 'Não foi possível aprovar o item.', variant: 'destructive' });
+    }
+  };
+
+  const handleRejectItem = async (orderId: string, itemId: string) => {
+    try {
+      const response = await rejectOrderItem(orderId, itemId);
+      if (response.success) {
+        toast({ title: 'Sucesso', description: response.message });
+        fetchData();
+      }
+    } catch (error) {
+      toast({ title: 'Erro', description: 'Não foi possível rejeitar o item.', variant: 'destructive' });
+    }
+  };
+
+  const toggleExpandOrder = (orderId: string) => {
+    const newExpanded = new Set(expandedOrders);
+    if (newExpanded.has(orderId)) {
+      newExpanded.delete(orderId);
+    } else {
+      newExpanded.add(orderId);
+    }
+    setExpandedOrders(newExpanded);
   };
 
   const getStatusBadge = (status: string) => {
@@ -246,6 +330,8 @@ export default function Orders() {
         return <Badge variant="secondary" className="bg-warning text-warning-foreground">Pendente</Badge>;
       case 'rejected':
         return <Badge variant="destructive">Rejeitado</Badge>;
+      case 'partial':
+        return <Badge variant="outline" className="border-primary text-primary">Parcial</Badge>;
       default:
         return <Badge variant="outline">{status}</Badge>;
     }
@@ -316,6 +402,7 @@ export default function Orders() {
                   <SelectItem value="all">Todos</SelectItem>
                   <SelectItem value="pending">Pendente</SelectItem>
                   <SelectItem value="approved">Aprovado</SelectItem>
+                  <SelectItem value="partial">Parcial</SelectItem>
                   <SelectItem value="rejected">Rejeitado</SelectItem>
                 </SelectContent>
               </Select>
@@ -327,42 +414,41 @@ export default function Orders() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10"></TableHead>
                   <TableHead><SortButton field="orderNumber">Nº Pedido</SortButton></TableHead>
                   <TableHead><SortButton field="date">Data</SortButton></TableHead>
-                  <TableHead>Produto</TableHead>
-                  <TableHead><SortButton field="supplier">Fornecedor</SortButton></TableHead>
-                  <TableHead>Unidade</TableHead>
-                  <TableHead>Qtd.</TableHead>
+                  <TableHead>Itens</TableHead>
                   <TableHead><SortButton field="totalValue">Valor Total</SortButton></TableHead>
                   <TableHead>Solicitante</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Aprovador</TableHead>
                   <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredAndSortedOrders.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={11} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
                       Nenhum pedido encontrado
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredAndSortedOrders.map((order) => {
-                    const product = products.find(p => p.id === order.productId);
-                    return (
-                      <TableRow key={order.id}>
+                  filteredAndSortedOrders.map((order) => (
+                    <>
+                      <TableRow key={order.id} className="cursor-pointer hover:bg-muted/50" onClick={() => toggleExpandOrder(order.id)}>
+                        <TableCell>
+                          {expandedOrders.has(order.id) ? (
+                            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                          )}
+                        </TableCell>
                         <TableCell className="font-medium">{order.orderNumber}</TableCell>
                         <TableCell>{formatDate(order.date)}</TableCell>
-                        <TableCell>{order.productName}</TableCell>
-                        <TableCell>{order.supplier}</TableCell>
-                        <TableCell className="capitalize">{product?.unitType || '-'}</TableCell>
-                        <TableCell>{order.quantity}</TableCell>
+                        <TableCell>{order.items.length} produto(s)</TableCell>
                         <TableCell>{formatCurrency(order.totalValue)}</TableCell>
                         <TableCell>{order.createdByName}</TableCell>
                         <TableCell>{getStatusBadge(order.status)}</TableCell>
-                        <TableCell>{order.approvedByName || '-'}</TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="flex justify-end gap-2">
                             <Button
                               variant="ghost"
@@ -372,23 +458,23 @@ export default function Orders() {
                             >
                               <Pencil className="h-4 w-4" />
                             </Button>
-                            {isAdmin && order.status === 'pending' && (
+                            {isAdmin && (order.status === 'pending' || order.status === 'partial') && (
                               <>
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  onClick={() => handleApprove(order.id)}
+                                  onClick={() => handleApproveAll(order.id)}
                                   className="text-success hover:text-success hover:bg-success/10"
-                                  title="Aprovar pedido"
+                                  title="Aprovar todos"
                                 >
                                   <Check className="h-4 w-4" />
                                 </Button>
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  onClick={() => handleReject(order.id)}
+                                  onClick={() => handleRejectAll(order.id)}
                                   className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                                  title="Rejeitar pedido"
+                                  title="Rejeitar todos"
                                 >
                                   <X className="h-4 w-4" />
                                 </Button>
@@ -397,8 +483,70 @@ export default function Orders() {
                           </div>
                         </TableCell>
                       </TableRow>
-                    );
-                  })
+                      {expandedOrders.has(order.id) && (
+                        <TableRow className="bg-muted/30">
+                          <TableCell colSpan={8} className="p-0">
+                            <div className="p-4">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead>Produto</TableHead>
+                                    <TableHead>Fornecedor</TableHead>
+                                    <TableHead>Unidade</TableHead>
+                                    <TableHead>Qtd.</TableHead>
+                                    <TableHead>Custo Unit.</TableHead>
+                                    <TableHead>Valor</TableHead>
+                                    <TableHead>Status</TableHead>
+                                    {isAdmin && <TableHead className="text-right">Ações</TableHead>}
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {order.items.map((item) => {
+                                    const product = products.find(p => p.id === item.productId);
+                                    return (
+                                      <TableRow key={item.id}>
+                                        <TableCell>{item.productName}</TableCell>
+                                        <TableCell>{item.supplier}</TableCell>
+                                        <TableCell className="capitalize">{product?.unitType || '-'}</TableCell>
+                                        <TableCell>{item.quantity}</TableCell>
+                                        <TableCell>{formatCurrency(item.unitCost)}</TableCell>
+                                        <TableCell>{formatCurrency(item.totalValue)}</TableCell>
+                                        <TableCell>{getStatusBadge(item.status)}</TableCell>
+                                        {isAdmin && (
+                                          <TableCell className="text-right">
+                                            {item.status === 'pending' && (
+                                              <div className="flex justify-end gap-1">
+                                                <Button
+                                                  variant="ghost"
+                                                  size="icon"
+                                                  onClick={() => handleApproveItem(order.id, item.id)}
+                                                  className="h-7 w-7 text-success hover:text-success hover:bg-success/10"
+                                                >
+                                                  <Check className="h-3 w-3" />
+                                                </Button>
+                                                <Button
+                                                  variant="ghost"
+                                                  size="icon"
+                                                  onClick={() => handleRejectItem(order.id, item.id)}
+                                                  className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                                >
+                                                  <X className="h-3 w-3" />
+                                                </Button>
+                                              </div>
+                                            )}
+                                          </TableCell>
+                                        )}
+                                      </TableRow>
+                                    );
+                                  })}
+                                </TableBody>
+                              </Table>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </>
+                  ))
                 )}
               </TableBody>
             </Table>
@@ -408,7 +556,7 @@ export default function Orders() {
 
       {/* Create/Edit Order Dialog */}
       <Dialog open={dialogOpen} onOpenChange={handleCloseDialog}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingOrder ? 'Editar Pedido' : 'Novo Pedido'}</DialogTitle>
             {editingOrder && !isAdmin && (
@@ -440,63 +588,103 @@ export default function Orders() {
                 />
               </div>
             </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="product">Produto</Label>
-              <Select
-                value={formData.productId}
-                onValueChange={(value) => setFormData({ ...formData, productId: value })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione um produto" />
-                </SelectTrigger>
-                <SelectContent>
-                  {products.map((product) => (
-                    <SelectItem key={product.id} value={product.id}>
-                      {product.name} - {product.supplier}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
 
-            {selectedProduct && (
-              <div className="grid grid-cols-3 gap-4 p-3 bg-muted rounded-lg">
-                <div>
-                  <p className="text-xs text-muted-foreground">Fornecedor</p>
-                  <p className="font-medium">{selectedProduct.supplier}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Custo Unitário</p>
-                  <p className="font-medium">{formatCurrency(selectedProduct.unitCost)}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Unidade</p>
-                  <p className="font-medium capitalize">{selectedProduct.unitType}</p>
-                </div>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label>Produtos do Pedido</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAddItem}
+                  disabled={formData.items.length >= MAX_ITEMS_PER_ORDER}
+                >
+                  <Plus className="h-3 w-3 mr-1" />
+                  Adicionar Produto
+                </Button>
               </div>
-            )}
-
-            <div className="space-y-2">
-              <Label htmlFor="quantity">Quantidade</Label>
-              <Input
-                id="quantity"
-                type="number"
-                min="1"
-                value={formData.quantity}
-                onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
-                required
-                placeholder="0"
-              />
+              <p className="text-xs text-muted-foreground">
+                {formData.items.length}/{MAX_ITEMS_PER_ORDER} produtos
+              </p>
+              
+              <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
+                {formData.items.map((item, index) => {
+                  const selectedProduct = products.find(p => p.id === item.productId);
+                  return (
+                    <div key={index} className="p-3 border rounded-lg space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-muted-foreground">Item {index + 1}</span>
+                        {formData.items.length > 1 && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-destructive"
+                            onClick={() => handleRemoveItem(index)}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <Label className="text-xs">Produto</Label>
+                          <Select
+                            value={item.productId}
+                            onValueChange={(value) => handleItemChange(index, 'productId', value)}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Selecione" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {products.map((product) => (
+                                <SelectItem key={product.id} value={product.id}>
+                                  {product.name} - {product.supplier}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Quantidade</Label>
+                          <Input
+                            type="number"
+                            min="1"
+                            value={item.quantity}
+                            onChange={(e) => handleItemChange(index, 'quantity', e.target.value)}
+                            placeholder="0"
+                          />
+                        </div>
+                      </div>
+                      {selectedProduct && (
+                        <div className="grid grid-cols-3 gap-2 text-xs bg-muted/50 p-2 rounded">
+                          <div>
+                            <span className="text-muted-foreground">Fornecedor:</span>
+                            <p className="font-medium">{selectedProduct.supplier}</p>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Custo Unit.:</span>
+                            <p className="font-medium">{formatCurrency(selectedProduct.unitCost)}</p>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Total:</span>
+                            <p className="font-medium text-primary">
+                              {item.quantity ? formatCurrency(selectedProduct.unitCost * parseInt(item.quantity)) : '-'}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
 
-            {calculatedTotal > 0 && (
-              <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg">
+            {calculateTotal() > 0 && (
+              <div className="p-3 bg-primary/5 border border-primary/20 rounded-lg">
                 <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Valor Total do Pedido:</span>
-                  <span className="text-lg font-bold text-primary">
-                    {formatCurrency(calculatedTotal)}
-                  </span>
+                  <span className="font-medium">Total do Pedido:</span>
+                  <span className="text-xl font-bold text-primary">{formatCurrency(calculateTotal())}</span>
                 </div>
               </div>
             )}
@@ -505,7 +693,7 @@ export default function Orders() {
               <Button type="button" variant="outline" onClick={handleCloseDialog}>
                 Cancelar
               </Button>
-              <Button type="submit" disabled={!formData.productId || !formData.quantity}>
+              <Button type="submit">
                 {editingOrder ? 'Salvar Alterações' : 'Criar Pedido'}
               </Button>
             </DialogFooter>
