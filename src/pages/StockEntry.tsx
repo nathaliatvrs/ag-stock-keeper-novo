@@ -65,6 +65,7 @@ export default function StockEntry() {
     paymentMethod: '' as PaymentMethod | '',
     installments: '1',
     firstDueDate: new Date().toISOString().split('T')[0],
+    customTotalValue: '', // Valor total editável
   });
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -98,9 +99,13 @@ export default function StockEntry() {
   }, []);
 
   const selectedOrder = approvedOrders.find((o) => o.id === formData.orderId);
-  const calculatedTotal = selectedOrder && formData.quantity 
+  const originalTotal = selectedOrder && formData.quantity 
     ? selectedOrder.unitCost * parseInt(formData.quantity)
     : 0;
+  // Usa valor customizado se editado, senão usa o calculado original
+  const calculatedTotal = formData.customTotalValue 
+    ? parseFloat(formData.customTotalValue)
+    : originalTotal;
   const installmentValue = calculatedTotal && parseInt(formData.installments) > 0
     ? calculatedTotal / parseInt(formData.installments)
     : 0;
@@ -172,6 +177,7 @@ export default function StockEntry() {
         paymentMethod: formData.paymentMethod,
         installments: parseInt(formData.installments),
         firstDueDate: formData.firstDueDate,
+        customTotalValue: formData.customTotalValue ? parseFloat(formData.customTotalValue) : undefined,
       });
       
       if (response.success) {
@@ -418,16 +424,31 @@ export default function StockEntry() {
               </div>
             )}
 
-            {calculatedTotal > 0 && (
-              <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg space-y-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Valor Total:</span>
-                  <span className="text-lg font-bold text-primary">
-                    {formatCurrency(calculatedTotal)}
-                  </span>
+            {originalTotal > 0 && (
+              <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="customTotalValue">Valor Total (editável)</Label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground">R$</span>
+                    <Input
+                      id="customTotalValue"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder={originalTotal.toFixed(2)}
+                      value={formData.customTotalValue}
+                      onChange={(e) => setFormData({ ...formData, customTotalValue: e.target.value })}
+                      className="text-lg font-bold text-primary"
+                    />
+                  </div>
+                  {formData.customTotalValue && parseFloat(formData.customTotalValue) !== originalTotal && (
+                    <p className="text-xs text-muted-foreground">
+                      Valor original: {formatCurrency(originalTotal)}
+                    </p>
+                  )}
                 </div>
-                {parseInt(formData.installments) > 1 && (
-                  <div className="flex justify-between items-center text-sm">
+                {parseInt(formData.installments) > 1 && calculatedTotal > 0 && (
+                  <div className="flex justify-between items-center text-sm pt-2 border-t">
                     <span className="text-muted-foreground">Valor por Parcela:</span>
                     <span className="font-medium">
                       {formData.installments}x de {formatCurrency(installmentValue)}
