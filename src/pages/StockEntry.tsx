@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Download } from 'lucide-react';
+import { Plus, Search, Download, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,9 +27,10 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { getOrders, getStockEntries, getProducts, createStockEntry } from '@/services/api';
-import { Order, StockEntry as StockEntryType, PaymentMethod, Product } from '@/types';
+import { Order, StockEntry as StockEntryType, PaymentMethod, Product, OrderItem } from '@/types';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { exportToExcel } from '@/lib/excel';
 import { useNavigate } from 'react-router-dom';
@@ -51,6 +52,17 @@ const installmentOptions = [
   { value: 12, label: '12x' },
 ];
 
+interface InvoiceFormItem {
+  orderItemId: string;
+  quantity: string;
+  adjustedUnitCost: string;
+}
+
+interface InvoiceForm {
+  invoiceNumber: string;
+  items: InvoiceFormItem[];
+}
+
 export default function StockEntry() {
   const [entries, setEntries] = useState<StockEntryType[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -61,11 +73,10 @@ export default function StockEntry() {
   const [formData, setFormData] = useState({
     orderId: '',
     date: new Date().toISOString().split('T')[0],
-    quantity: '',
     paymentMethod: '' as PaymentMethod | '',
     installments: '1',
     firstDueDate: new Date().toISOString().split('T')[0],
-    customTotalValue: '', // Valor total editável
+    invoices: [] as InvoiceForm[],
   });
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -82,7 +93,10 @@ export default function StockEntry() {
         setEntries(entriesRes.data);
       }
       if (ordersRes.success && ordersRes.data) {
-        setApprovedOrders(ordersRes.data.filter((o) => o.status === 'approved'));
+        // Filtra pedidos com pelo menos um item aprovado
+        setApprovedOrders(ordersRes.data.filter((o) => 
+          o.status === 'approved' || o.status === 'partial'
+        ));
       }
       if (productsRes.success && productsRes.data) {
         setProducts(productsRes.data);
@@ -98,90 +112,116 @@ export default function StockEntry() {
     fetchData();
   }, []);
 
-  // Calcula quantidade já entrada para cada pedido
-  const getEnteredQuantityForOrder = (orderId: string): number => {
-    return entries
-      .filter((entry) => entry.orderId === orderId)
-      .reduce((sum, entry) => sum + entry.quantity, 0);
+  const selectedOrder = approvedOrders.find((o) => o.id === formData.orderId);
+  const approvedItems = selectedOrder?.items.filter(item => item.status === 'approved') || [];
+
+  // Calcula o total de todas as NFs
+  const calculateTotalValue = () => {
+    return formData.invoices.reduce((total, inv) => {
+      return total + inv.items.reduce((invTotal, item) => {
+        const qty = parseInt(item.quantity) || 0;
+        const cost = parseFloat(item.adjustedUnitCost) || 0;
+        return invTotal + (qty * cost);
+      }, 0);
+    }, 0);
   };
 
-  // Filtra pedidos aprovados que ainda têm quantidade disponível
-  const availableOrders = approvedOrders.filter((order) => {
-    const enteredQty = getEnteredQuantityForOrder(order.id);
-    return enteredQty < order.quantity;
-  });
-
-  const selectedOrder = approvedOrders.find((o) => o.id === formData.orderId);
-  const enteredQuantity = selectedOrder ? getEnteredQuantityForOrder(selectedOrder.id) : 0;
-  const remainingQuantity = selectedOrder ? selectedOrder.quantity - enteredQuantity : 0;
-  
-  const originalTotal = selectedOrder && formData.quantity 
-    ? selectedOrder.unitCost * parseInt(formData.quantity)
-    : 0;
-  // Usa valor customizado se editado, senão usa o calculado original
-  const calculatedTotal = formData.customTotalValue 
-    ? parseFloat(formData.customTotalValue)
-    : originalTotal;
-  const installmentValue = calculatedTotal && parseInt(formData.installments) > 0
-    ? calculatedTotal / parseInt(formData.installments)
+  const totalValue = calculateTotalValue();
+  const installmentValue = totalValue && parseInt(formData.installments) > 0
+    ? totalValue / parseInt(formData.installments)
     : 0;
 
   const filteredEntries = entries.filter(
     (entry) =>
       entry.orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      entry.productName.toLowerCase().includes(searchTerm.toLowerCase())
+      entry.invoices.some(inv => 
+        inv.items.some(item => item.productName.toLowerCase().includes(searchTerm.toLowerCase()))
+      )
   );
 
-  const getProductInfo = (productId: string) => {
-    return products.find((p) => p.id === productId);
-  };
-
-  const calculateInstallmentDates = () => {
-    const numInstallments = parseInt(formData.installments);
-    const firstDate = new Date(formData.firstDueDate);
-    const dates: { number: number; date: string; value: number }[] = [];
-    
-    for (let i = 0; i < numInstallments; i++) {
-      const dueDate = new Date(firstDate);
-      dueDate.setMonth(dueDate.getMonth() + i);
-      dates.push({
-        number: i + 1,
-        date: dueDate.toISOString().split('T')[0],
-        value: installmentValue,
-      });
-    }
-    return dates;
+  const getEntryProductsDisplay = (entry: StockEntryType) => {
+    const names = entry.invoices.flatMap(inv => inv.items.map(item => item.productName));
+    if (names.length === 1) return names[0];
+    return `${names[0]} +${names.length - 1}`;
   };
 
   const handleExport = () => {
-    const dataToExport = filteredEntries.map((entry) => {
-      const product = getProductInfo(entry.productId);
-      return {
-        'Nº Pedido': entry.orderNumber,
-        'Data Entrada': formatDate(entry.date),
-        'Produto': entry.productName,
-        'Fornecedor': entry.supplier,
-        'Unidade': product?.unitType || '-',
-        'Quantidade': entry.quantity,
-        'Valor Total': entry.totalValue,
-        'Pagamento': getPaymentMethodLabel(entry.paymentMethod),
-        'Parcelas': entry.installments,
-        'Responsável': entry.createdByName,
-      };
+    const dataToExport: any[] = [];
+    filteredEntries.forEach((entry) => {
+      entry.invoices.forEach((inv) => {
+        inv.items.forEach((item) => {
+          const product = products.find(p => p.id === item.productId);
+          dataToExport.push({
+            'Nº Pedido': entry.orderNumber,
+            'NF': inv.invoiceNumber,
+            'Data Entrada': formatDate(entry.date),
+            'Produto': item.productName,
+            'Fornecedor': item.supplier,
+            'Unidade': product?.unitType || '-',
+            'Quantidade': item.quantity,
+            'Custo Unit.': item.adjustedUnitCost,
+            'Valor Total': item.totalValue,
+            'Pagamento': getPaymentMethodLabel(entry.paymentMethod),
+            'Parcelas': entry.installments,
+            'Responsável': entry.createdByName,
+          });
+        });
+      });
     });
     exportToExcel(dataToExport, 'entradas_estoque');
     toast({ title: 'Sucesso', description: 'Arquivo exportado com sucesso!' });
+  };
+
+  const handleAddInvoice = () => {
+    setFormData({
+      ...formData,
+      invoices: [...formData.invoices, { invoiceNumber: '', items: [] }],
+    });
+  };
+
+  const handleRemoveInvoice = (index: number) => {
+    const newInvoices = formData.invoices.filter((_, i) => i !== index);
+    setFormData({ ...formData, invoices: newInvoices });
+  };
+
+  const handleInvoiceChange = (invIndex: number, field: string, value: string) => {
+    const newInvoices = [...formData.invoices];
+    newInvoices[invIndex] = { ...newInvoices[invIndex], [field]: value };
+    setFormData({ ...formData, invoices: newInvoices });
+  };
+
+  const handleToggleItemInInvoice = (invIndex: number, orderItem: OrderItem) => {
+    const newInvoices = [...formData.invoices];
+    const existingIndex = newInvoices[invIndex].items.findIndex(i => i.orderItemId === orderItem.id);
+    
+    if (existingIndex >= 0) {
+      newInvoices[invIndex].items.splice(existingIndex, 1);
+    } else {
+      newInvoices[invIndex].items.push({
+        orderItemId: orderItem.id,
+        quantity: orderItem.quantity.toString(),
+        adjustedUnitCost: orderItem.unitCost.toString(),
+      });
+    }
+    setFormData({ ...formData, invoices: newInvoices });
+  };
+
+  const handleItemFieldChange = (invIndex: number, itemIndex: number, field: string, value: string) => {
+    const newInvoices = [...formData.invoices];
+    newInvoices[invIndex].items[itemIndex] = { ...newInvoices[invIndex].items[itemIndex], [field]: value };
+    setFormData({ ...formData, invoices: newInvoices });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!formData.paymentMethod) {
-      toast({
-        title: 'Erro',
-        description: 'Selecione uma forma de pagamento.',
-        variant: 'destructive',
-      });
+      toast({ title: 'Erro', description: 'Selecione uma forma de pagamento.', variant: 'destructive' });
+      return;
+    }
+
+    if (formData.invoices.length === 0 || formData.invoices.every(inv => inv.items.length === 0)) {
+      toast({ title: 'Erro', description: 'Adicione pelo menos uma NF com produtos.', variant: 'destructive' });
       return;
     }
 
@@ -189,11 +229,17 @@ export default function StockEntry() {
       const response = await createStockEntry({
         orderId: formData.orderId,
         date: formData.date,
-        quantity: parseInt(formData.quantity),
         paymentMethod: formData.paymentMethod,
         installments: parseInt(formData.installments),
         firstDueDate: formData.firstDueDate,
-        customTotalValue: formData.customTotalValue ? parseFloat(formData.customTotalValue) : undefined,
+        invoices: formData.invoices.map(inv => ({
+          invoiceNumber: inv.invoiceNumber,
+          items: inv.items.map(item => ({
+            orderItemId: item.orderItemId,
+            quantity: parseInt(item.quantity),
+            adjustedUnitCost: parseFloat(item.adjustedUnitCost),
+          })),
+        })),
       });
       
       if (response.success) {
@@ -203,16 +249,23 @@ export default function StockEntry() {
         navigate('/estoque/consultar');
       }
     } catch (error) {
-      toast({
-        title: 'Erro',
-        description: 'Não foi possível registrar a entrada.',
-        variant: 'destructive',
-      });
+      toast({ title: 'Erro', description: 'Não foi possível registrar a entrada.', variant: 'destructive' });
     }
   };
 
   const getPaymentMethodLabel = (method: PaymentMethod) => {
     return paymentMethods.find((m) => m.value === method)?.label || method;
+  };
+
+  const resetForm = () => {
+    setFormData({
+      orderId: '',
+      date: new Date().toISOString().split('T')[0],
+      paymentMethod: '' as PaymentMethod | '',
+      installments: '1',
+      firstDueDate: new Date().toISOString().split('T')[0],
+      invoices: [],
+    });
   };
 
   if (loading) {
@@ -225,39 +278,30 @@ export default function StockEntry() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-foreground">Entrada de Estoque</h1>
-          <p className="text-muted-foreground mt-1">
-            Registre a entrada de produtos no estoque
-          </p>
+          <p className="text-muted-foreground mt-1">Registre a entrada de produtos no estoque</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={handleExport}>
             <Download className="h-4 w-4 mr-2" />
             Exportar Excel
           </Button>
-          <Button onClick={() => setDialogOpen(true)}>
+          <Button onClick={() => { resetForm(); setDialogOpen(true); }}>
             <Plus className="h-4 w-4 mr-2" />
             Nova Entrada
           </Button>
         </div>
       </div>
 
-      {/* Entries Table */}
       <Card>
         <CardHeader>
           <div className="flex flex-col sm:flex-row gap-4 sm:items-center sm:justify-between">
             <CardTitle>Entradas Registradas</CardTitle>
             <div className="relative w-full sm:w-64">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar entradas..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9"
-              />
+              <Input placeholder="Buscar entradas..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-9" />
             </div>
           </div>
         </CardHeader>
@@ -267,11 +311,10 @@ export default function StockEntry() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Nº Pedido</TableHead>
+                  <TableHead>NFs</TableHead>
                   <TableHead>Data Entrada</TableHead>
-                  <TableHead>Produto</TableHead>
-                  <TableHead>Fornecedor</TableHead>
-                  <TableHead>Unidade</TableHead>
-                  <TableHead>Qtd.</TableHead>
+                  <TableHead>Produtos</TableHead>
+                  <TableHead>Qtd. Total</TableHead>
                   <TableHead>Valor Total</TableHead>
                   <TableHead>Pagamento</TableHead>
                   <TableHead>Parcelas</TableHead>
@@ -281,32 +324,24 @@ export default function StockEntry() {
               <TableBody>
                 {filteredEntries.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
-                      Nenhuma entrada encontrada
-                    </TableCell>
+                    <TableCell colSpan={9} className="text-center text-muted-foreground py-8">Nenhuma entrada encontrada</TableCell>
                   </TableRow>
                 ) : (
-                  filteredEntries.map((entry) => {
-                    const product = getProductInfo(entry.productId);
-                    return (
-                      <TableRow key={entry.id}>
-                        <TableCell className="font-medium">{entry.orderNumber}</TableCell>
-                        <TableCell>{formatDate(entry.date)}</TableCell>
-                        <TableCell>{entry.productName}</TableCell>
-                        <TableCell>{entry.supplier}</TableCell>
-                        <TableCell className="capitalize">{product?.unitType || '-'}</TableCell>
-                        <TableCell>{entry.quantity}</TableCell>
-                        <TableCell>{formatCurrency(entry.totalValue)}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline">
-                            {getPaymentMethodLabel(entry.paymentMethod)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{entry.installments}x</TableCell>
-                        <TableCell>{entry.createdByName}</TableCell>
-                      </TableRow>
-                    );
-                  })
+                  filteredEntries.map((entry) => (
+                    <TableRow key={entry.id}>
+                      <TableCell className="font-medium">{entry.orderNumber}</TableCell>
+                      <TableCell>{entry.invoices.map(inv => inv.invoiceNumber).join(', ')}</TableCell>
+                      <TableCell>{formatDate(entry.date)}</TableCell>
+                      <TableCell title={entry.invoices.flatMap(inv => inv.items.map(i => i.productName)).join(', ')}>
+                        {getEntryProductsDisplay(entry)}
+                      </TableCell>
+                      <TableCell>{entry.totalQuantity}</TableCell>
+                      <TableCell>{formatCurrency(entry.totalValue)}</TableCell>
+                      <TableCell><Badge variant="outline">{getPaymentMethodLabel(entry.paymentMethod)}</Badge></TableCell>
+                      <TableCell>{entry.installments}x</TableCell>
+                      <TableCell>{entry.createdByName}</TableCell>
+                    </TableRow>
+                  ))
                 )}
               </TableBody>
             </Table>
@@ -314,201 +349,128 @@ export default function StockEntry() {
         </CardContent>
       </Card>
 
-      {/* Create Entry Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Nova Entrada de Estoque</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="order">Pedido Aprovado</Label>
-              <Select
-                value={formData.orderId}
-                onValueChange={(value) => setFormData({ ...formData, orderId: value })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione um pedido aprovado" />
-                </SelectTrigger>
+              <Label>Pedido Aprovado</Label>
+              <Select value={formData.orderId} onValueChange={(value) => setFormData({ ...formData, orderId: value, invoices: [] })}>
+                <SelectTrigger><SelectValue placeholder="Selecione um pedido aprovado" /></SelectTrigger>
                 <SelectContent>
-                  {availableOrders.map((order) => {
-                    const remaining = order.quantity - getEnteredQuantityForOrder(order.id);
-                    return (
-                      <SelectItem key={order.id} value={order.id}>
-                        {order.orderNumber} - {order.productName} ({remaining} restantes)
-                      </SelectItem>
-                    );
-                  })}
+                  {approvedOrders.map((order) => (
+                    <SelectItem key={order.id} value={order.id}>
+                      {order.orderNumber} - {order.items.filter(i => i.status === 'approved').length} item(s) aprovado(s)
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
 
             {selectedOrder && (
-              <div className="grid grid-cols-2 gap-4 p-3 bg-muted rounded-lg">
-                <div>
-                  <p className="text-xs text-muted-foreground">Produto</p>
-                  <p className="font-medium">{selectedOrder.productName}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Fornecedor</p>
-                  <p className="font-medium">{selectedOrder.supplier}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Custo Unitário</p>
-                  <p className="font-medium">{formatCurrency(selectedOrder.unitCost)}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Qtd. Pedida</p>
-                  <p className="font-medium">{selectedOrder.quantity}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Já Entrada</p>
-                  <p className="font-medium">{enteredQuantity}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Disponível p/ Entrada</p>
-                  <p className="font-medium text-primary">{remainingQuantity}</p>
-                </div>
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="date">Data da Entrada</Label>
-                <Input
-                  id="date"
-                  type="date"
-                  value={formData.date}
-                  onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="quantity">Quantidade (máx: {remainingQuantity})</Label>
-                <Input
-                  id="quantity"
-                  type="number"
-                  min="1"
-                  max={remainingQuantity}
-                  value={formData.quantity}
-                  onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
-                  required
-                  placeholder="0"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="paymentMethod">Forma de Pagamento</Label>
-                <Select
-                  value={formData.paymentMethod}
-                  onValueChange={(value) => setFormData({ ...formData, paymentMethod: value as PaymentMethod })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {paymentMethods.map((method) => (
-                      <SelectItem key={method.value} value={method.value}>
-                        {method.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="installments">Parcelas</Label>
-                <Select
-                  value={formData.installments}
-                  onValueChange={(value) => setFormData({ ...formData, installments: value })}
-                  disabled={formData.paymentMethod === 'pix'}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {installmentOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value.toString()}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {parseInt(formData.installments) >= 1 && formData.paymentMethod && (
-              <div className="space-y-2">
-                <Label htmlFor="firstDueDate">Data do Primeiro Vencimento</Label>
-                <Input
-                  id="firstDueDate"
-                  type="date"
-                  value={formData.firstDueDate}
-                  onChange={(e) => setFormData({ ...formData, firstDueDate: e.target.value })}
-                  required
-                />
-              </div>
-            )}
-
-            {originalTotal > 0 && (
-              <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg space-y-3">
-                <div className="space-y-2">
-                  <Label htmlFor="customTotalValue">Valor Total (editável)</Label>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-muted-foreground">R$</span>
-                    <Input
-                      id="customTotalValue"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      placeholder={originalTotal.toFixed(2)}
-                      value={formData.customTotalValue}
-                      onChange={(e) => setFormData({ ...formData, customTotalValue: e.target.value })}
-                      className="text-lg font-bold text-primary"
-                    />
+              <>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Data da Entrada</Label>
+                    <Input type="date" value={formData.date} onChange={(e) => setFormData({ ...formData, date: e.target.value })} required />
                   </div>
-                  {formData.customTotalValue && parseFloat(formData.customTotalValue) !== originalTotal && (
-                    <p className="text-xs text-muted-foreground">
-                      Valor original: {formatCurrency(originalTotal)}
-                    </p>
-                  )}
-                </div>
-                {parseInt(formData.installments) > 1 && calculatedTotal > 0 && (
-                  <div className="flex justify-between items-center text-sm pt-2 border-t">
-                    <span className="text-muted-foreground">Valor por Parcela:</span>
-                    <span className="font-medium">
-                      {formData.installments}x de {formatCurrency(installmentValue)}
-                    </span>
+                  <div className="space-y-2">
+                    <Label>Forma de Pagamento</Label>
+                    <Select value={formData.paymentMethod} onValueChange={(value) => setFormData({ ...formData, paymentMethod: value as PaymentMethod })}>
+                      <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
+                      <SelectContent>
+                        {paymentMethods.map((method) => (<SelectItem key={method.value} value={method.value}>{method.label}</SelectItem>))}
+                      </SelectContent>
+                    </Select>
                   </div>
-                )}
-              </div>
-            )}
+                </div>
 
-            {parseInt(formData.installments) > 1 && formData.firstDueDate && calculatedTotal > 0 && (
-              <div className="p-3 bg-muted rounded-lg space-y-2">
-                <p className="text-sm font-medium text-foreground">Vencimentos das Parcelas:</p>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  {calculateInstallmentDates().map((inst) => (
-                    <div key={inst.number} className="flex justify-between">
-                      <span className="text-muted-foreground">{inst.number}ª parcela:</span>
-                      <span>{formatDate(inst.date)}</span>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Parcelas</Label>
+                    <Select value={formData.installments} onValueChange={(value) => setFormData({ ...formData, installments: value })} disabled={formData.paymentMethod === 'pix'}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {installmentOptions.map((option) => (<SelectItem key={option.value} value={option.value.toString()}>{option.label}</SelectItem>))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Data do Primeiro Vencimento</Label>
+                    <Input type="date" value={formData.firstDueDate} onChange={(e) => setFormData({ ...formData, firstDueDate: e.target.value })} required />
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label>Notas Fiscais</Label>
+                    <Button type="button" variant="outline" size="sm" onClick={handleAddInvoice}>
+                      <Plus className="h-3 w-3 mr-1" />Adicionar NF
+                    </Button>
+                  </div>
+
+                  {formData.invoices.map((inv, invIndex) => (
+                    <div key={invIndex} className="border rounded-lg p-3 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <Input placeholder="Número da NF" value={inv.invoiceNumber} onChange={(e) => handleInvoiceChange(invIndex, 'invoiceNumber', e.target.value)} className="flex-1" />
+                        <Button type="button" variant="ghost" size="icon" className="text-destructive" onClick={() => handleRemoveInvoice(invIndex)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs">Selecione os produtos desta NF:</Label>
+                        <div className="space-y-2 max-h-[150px] overflow-y-auto">
+                          {approvedItems.map((orderItem) => {
+                            const isSelected = inv.items.some(i => i.orderItemId === orderItem.id);
+                            const itemData = inv.items.find(i => i.orderItemId === orderItem.id);
+                            const itemIndex = inv.items.findIndex(i => i.orderItemId === orderItem.id);
+                            
+                            return (
+                              <div key={orderItem.id} className="p-2 border rounded bg-muted/30">
+                                <div className="flex items-center gap-2">
+                                  <Checkbox checked={isSelected} onCheckedChange={() => handleToggleItemInInvoice(invIndex, orderItem)} />
+                                  <span className="flex-1 text-sm">{orderItem.productName} ({orderItem.supplier})</span>
+                                </div>
+                                {isSelected && itemData && (
+                                  <div className="grid grid-cols-2 gap-2 mt-2 pl-6">
+                                    <div>
+                                      <Label className="text-xs">Quantidade</Label>
+                                      <Input type="number" min="1" max={orderItem.quantity} value={itemData.quantity} onChange={(e) => handleItemFieldChange(invIndex, itemIndex, 'quantity', e.target.value)} className="h-8" />
+                                    </div>
+                                    <div>
+                                      <Label className="text-xs">Custo Unit. Ajustado</Label>
+                                      <Input type="number" step="0.01" value={itemData.adjustedUnitCost} onChange={(e) => handleItemFieldChange(invIndex, itemIndex, 'adjustedUnitCost', e.target.value)} className="h-8" />
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
-              </div>
+
+                {totalValue > 0 && (
+                  <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg">
+                    <div className="flex justify-between items-center">
+                      <span>Total do Pedido:</span>
+                      <span className="text-xl font-bold text-primary">{formatCurrency(totalValue)}</span>
+                    </div>
+                    {parseInt(formData.installments) > 1 && (
+                      <p className="text-sm text-muted-foreground mt-1">{formData.installments}x de {formatCurrency(installmentValue)}</p>
+                    )}
+                  </div>
+                )}
+              </>
             )}
 
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
-                Cancelar
-              </Button>
-              <Button 
-                type="submit" 
-                disabled={!formData.orderId || !formData.quantity || !formData.paymentMethod}
-              >
-                Registrar Entrada
-              </Button>
+              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
+              <Button type="submit" disabled={!selectedOrder || formData.invoices.length === 0}>Registrar Entrada</Button>
             </DialogFooter>
           </form>
         </DialogContent>
