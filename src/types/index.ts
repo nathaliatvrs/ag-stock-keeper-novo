@@ -48,6 +48,7 @@ export interface PaymentInstallment {
   installmentNumber: number;
   value: number;
   dueDate: string;
+  paidAt: string | null;
 }
 
 export interface StockEntry {

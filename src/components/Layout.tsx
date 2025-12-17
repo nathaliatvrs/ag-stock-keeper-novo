@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Menu,
   BoxesIcon,
+  CreditCard,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -20,6 +21,7 @@ interface NavItem {
   title: string;
   href: string;
   icon: React.ElementType;
+  children?: { title: string; href: string }[];
 }
 
 const navItems: NavItem[] = [
@@ -29,6 +31,14 @@ const navItems: NavItem[] = [
   { title: 'Entrada de Estoque', href: '/estoque/entrada', icon: Warehouse },
   { title: 'Consultar Estoque', href: '/estoque/consultar', icon: BoxesIcon },
   { title: 'Saídas', href: '/saidas', icon: LogOutIcon },
+  { 
+    title: 'Pagamentos', 
+    href: '/pagamentos', 
+    icon: CreditCard,
+    children: [
+      { title: 'Pagamento de Pedidos', href: '/pagamentos/pedidos' }
+    ]
+  },
   { title: 'Relatório de Estoque', href: '/relatorio', icon: FileText },
 ];
 
@@ -39,11 +49,18 @@ interface LayoutProps {
 export default function Layout({ children }: LayoutProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [expandedMenus, setExpandedMenus] = useState<string[]>(['Pagamentos']);
   const location = useLocation();
 
   const isActive = (path: string) => {
     if (path === '/') return location.pathname === '/';
     return location.pathname.startsWith(path);
+  };
+
+  const toggleMenu = (title: string) => {
+    setExpandedMenus((prev) =>
+      prev.includes(title) ? prev.filter((t) => t !== title) : [...prev, title]
+    );
   };
 
   const NavContent = () => (
@@ -69,22 +86,72 @@ export default function Layout({ children }: LayoutProps) {
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto scrollbar-thin">
         {navItems.map((item) => (
-          <Link
-            key={item.href}
-            to={item.href}
-            onClick={() => setMobileOpen(false)}
-            className={cn(
-              "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200",
-              "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-              isActive(item.href) 
-                ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium" 
-                : "text-sidebar-foreground/80",
-              collapsed && "justify-center px-2"
+          <div key={item.href}>
+            {item.children ? (
+              <>
+                <button
+                  onClick={() => toggleMenu(item.title)}
+                  className={cn(
+                    "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 w-full",
+                    "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                    isActive(item.href) 
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium" 
+                      : "text-sidebar-foreground/80",
+                    collapsed && "justify-center px-2"
+                  )}
+                >
+                  <item.icon className={cn("h-5 w-5 flex-shrink-0", collapsed && "h-6 w-6")} />
+                  {!collapsed && (
+                    <>
+                      <span className="truncate flex-1 text-left">{item.title}</span>
+                      <ChevronRight 
+                        className={cn(
+                          "h-4 w-4 transition-transform",
+                          expandedMenus.includes(item.title) && "rotate-90"
+                        )} 
+                      />
+                    </>
+                  )}
+                </button>
+                {!collapsed && expandedMenus.includes(item.title) && (
+                  <div className="ml-8 mt-1 space-y-1">
+                    {item.children.map((child) => (
+                      <Link
+                        key={child.href}
+                        to={child.href}
+                        onClick={() => setMobileOpen(false)}
+                        className={cn(
+                          "flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200",
+                          "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                          isActive(child.href) 
+                            ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium" 
+                            : "text-sidebar-foreground/70"
+                        )}
+                      >
+                        <span className="truncate">{child.title}</span>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <Link
+                to={item.href}
+                onClick={() => setMobileOpen(false)}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200",
+                  "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                  isActive(item.href) 
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium" 
+                    : "text-sidebar-foreground/80",
+                  collapsed && "justify-center px-2"
+                )}
+              >
+                <item.icon className={cn("h-5 w-5 flex-shrink-0", collapsed && "h-6 w-6")} />
+                {!collapsed && <span className="truncate">{item.title}</span>}
+              </Link>
             )}
-          >
-            <item.icon className={cn("h-5 w-5 flex-shrink-0", collapsed && "h-6 w-6")} />
-            {!collapsed && <span className="truncate">{item.title}</span>}
-          </Link>
+          </div>
         ))}
       </nav>
 

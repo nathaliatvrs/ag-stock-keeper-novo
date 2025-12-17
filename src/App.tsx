@@ -11,6 +11,7 @@ import StockEntry from "./pages/StockEntry";
 import StockConsult from "./pages/StockConsult";
 import StockExits from "./pages/StockExits";
 import StockReport from "./pages/StockReport";
+import OrderPayments from "./pages/OrderPayments";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -30,6 +31,7 @@ const App = () => (
             <Route path="/estoque/consultar" element={<StockConsult />} />
             <Route path="/saidas" element={<StockExits />} />
             <Route path="/relatorio" element={<StockReport />} />
+            <Route path="/pagamentos/pedidos" element={<OrderPayments />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </Layout>

@@ -61,6 +61,7 @@ import {
   StockEntry, 
   StockItem, 
   StockExit,
+  PaymentInstallment,
   DashboardStats,
   ApiResponse,
   User,
@@ -73,6 +74,7 @@ import {
   mockStockEntries,
   mockStockItems,
   mockStockExits,
+  mockInstallments,
   mockDashboardStats,
   currentUser,
   adminUser,
@@ -246,6 +248,7 @@ export const createStockEntry = async (entryData: {
   quantity: number;
   paymentMethod: PaymentMethod;
   installments: number;
+  firstDueDate: string;
 }): Promise<ApiResponse<StockEntry>> => {
   await delay(500);
   
@@ -255,6 +258,7 @@ export const createStockEntry = async (entryData: {
   }
 
   const user = await getCurrentUser();
+  const totalValue = order.unitCost * entryData.quantity;
   const newEntry: StockEntry = {
     id: `entry-${Date.now()}`,
     date: entryData.date,
@@ -265,7 +269,7 @@ export const createStockEntry = async (entryData: {
     supplier: order.supplier,
     quantity: entryData.quantity,
     unitCost: order.unitCost,
-    totalValue: order.unitCost * entryData.quantity,
+    totalValue: totalValue,
     paymentMethod: entryData.paymentMethod,
     installments: entryData.installments,
     createdBy: user.data?.id || '',
@@ -276,6 +280,22 @@ export const createStockEntry = async (entryData: {
   };
   
   stockEntries = [...stockEntries, newEntry];
+  
+  // Create payment installments
+  const installmentValue = totalValue / entryData.installments;
+  const newInstallments: PaymentInstallment[] = Array.from({ length: entryData.installments }, (_, i) => {
+    const dueDate = new Date(entryData.firstDueDate);
+    dueDate.setMonth(dueDate.getMonth() + i);
+    return {
+      id: `inst-${Date.now()}-${i}`,
+      stockEntryId: newEntry.id,
+      installmentNumber: i + 1,
+      value: installmentValue,
+      dueDate: dueDate.toISOString().split('T')[0],
+      paidAt: null,
+    };
+  });
+  addInstallments(newInstallments);
   
   // Create individual stock items (exploded view)
   const newItems: StockItem[] = Array.from({ length: entryData.quantity }, (_, i) => ({
@@ -379,6 +399,22 @@ export const confirmStockExit = async (id: string): Promise<ApiResponse<StockExi
     confirmedAt: new Date().toISOString(),
   };
   return { success: true, data: stockExits[index], message: 'Saída confirmada!' };
+};
+
+// ============ PAYMENT INSTALLMENTS ============
+
+let installments = [...mockInstallments];
+
+export const getPaymentInstallments = async (stockEntryId?: string): Promise<ApiResponse<PaymentInstallment[]>> => {
+  await delay(300);
+  if (stockEntryId) {
+    return { success: true, data: installments.filter(i => i.stockEntryId === stockEntryId) };
+  }
+  return { success: true, data: installments };
+};
+
+export const addInstallments = (newInstallments: PaymentInstallment[]) => {
+  installments = [...installments, ...newInstallments];
 };
 
 // ============ DASHBOARD ============

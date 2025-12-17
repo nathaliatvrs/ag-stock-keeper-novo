@@ -183,9 +183,9 @@ export const mockStockExits: StockExit[] = [
 
 // Payment Installments
 export const mockInstallments: PaymentInstallment[] = [
-  { id: 'inst-1', stockEntryId: 'entry-1', installmentNumber: 1, value: 41666.67, dueDate: '2024-12-11' },
-  { id: 'inst-2', stockEntryId: 'entry-1', installmentNumber: 2, value: 41666.67, dueDate: '2025-01-11' },
-  { id: 'inst-3', stockEntryId: 'entry-1', installmentNumber: 3, value: 41666.66, dueDate: '2025-02-11' },
+  { id: 'inst-1', stockEntryId: 'entry-1', installmentNumber: 1, value: 41666.67, dueDate: '2024-12-11', paidAt: '2024-12-11T10:00:00Z' },
+  { id: 'inst-2', stockEntryId: 'entry-1', installmentNumber: 2, value: 41666.67, dueDate: '2025-01-11', paidAt: null },
+  { id: 'inst-3', stockEntryId: 'entry-1', installmentNumber: 3, value: 41666.66, dueDate: '2025-02-11', paidAt: null },
 ];
 
 // Dashboard Stats
