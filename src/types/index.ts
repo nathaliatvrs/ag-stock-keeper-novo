@@ -153,9 +153,20 @@ export interface StockItem {
   exitId: string | null;
 }
 
+// Item individual dentro de uma saída (para suportar múltiplos produtos)
+export interface StockExitItem {
+  productId: string;
+  productName: string;
+  supplier: string;
+  quantity: number;
+  totalCost: number;
+  unitCost: number;
+}
+
 export interface StockExit {
   id: string;
   stockItemIds: string[];
+  // Legacy fields para compatibilidade (primeiro produto)
   productId: string;
   productName: string;
   supplier: string;
@@ -169,6 +180,8 @@ export interface StockExit {
   confirmedBy: string | null;
   confirmedByName: string | null;
   confirmedAt: string | null;
+  // Campo para múltiplos produtos
+  items?: StockExitItem[];
 }
 
 // Dashboard Stats
