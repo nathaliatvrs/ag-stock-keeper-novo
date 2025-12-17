@@ -33,7 +33,9 @@
  * ENTRADA DE ESTOQUE:
  * - GET /stock-entries - Lista todas as entradas
  * - GET /stock-entries/:id - Busca entrada por ID
- * - POST /stock-entries - Cria nova entrada (gera StockItems automaticamente)
+ * - POST /stock-entries - Cria nova entrada (gera StockItems e PaymentInstallments automaticamente)
+ *   Body: { orderId, date, quantity, paymentMethod, installments, firstDueDate, customTotalValue? }
+ *   - customTotalValue: Valor total opcional para sobrescrever o cálculo automático (quando preço muda)
  * 
  * ITENS DE ESTOQUE (view explodida):
  * - GET /stock-items - Lista todos os itens
@@ -250,6 +252,7 @@ export const createStockEntry = async (entryData: {
   paymentMethod: PaymentMethod;
   installments: number;
   firstDueDate: string;
+  customTotalValue?: number; // Valor total editável
 }): Promise<ApiResponse<StockEntry>> => {
   await delay(500);
   
@@ -259,7 +262,9 @@ export const createStockEntry = async (entryData: {
   }
 
   const user = await getCurrentUser();
-  const totalValue = order.unitCost * entryData.quantity;
+  // Usa valor customizado se fornecido, senão calcula baseado no pedido
+  const totalValue = entryData.customTotalValue ?? (order.unitCost * entryData.quantity);
+  const effectiveUnitCost = totalValue / entryData.quantity;
   const newEntry: StockEntry = {
     id: `entry-${Date.now()}`,
     date: entryData.date,
@@ -269,7 +274,7 @@ export const createStockEntry = async (entryData: {
     productName: order.productName,
     supplier: order.supplier,
     quantity: entryData.quantity,
-    unitCost: order.unitCost,
+    unitCost: effectiveUnitCost,
     totalValue: totalValue,
     paymentMethod: entryData.paymentMethod,
     installments: entryData.installments,
@@ -298,14 +303,14 @@ export const createStockEntry = async (entryData: {
   });
   addInstallments(newInstallments);
   
-  // Create individual stock items (exploded view)
+  // Create individual stock items (exploded view) - usa custo efetivo
   const newItems: StockItem[] = Array.from({ length: entryData.quantity }, (_, i) => ({
     id: `item-${Date.now()}-${i}`,
     stockEntryId: newEntry.id,
     productId: order.productId,
     productName: order.productName,
     supplier: order.supplier,
-    unitCost: order.unitCost,
+    unitCost: effectiveUnitCost,
     entryDate: entryData.date,
     exitDate: null,
     status: 'available' as const,
