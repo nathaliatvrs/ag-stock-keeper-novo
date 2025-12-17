@@ -12,12 +12,21 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const fallbackAuthContext: AuthContextType = {
+  user: null,
+  isAdmin: false,
+  isLoading: true,
+  login: async () => ({ success: false, error: 'AuthProvider ausente' }),
+  logout: async () => {},
+};
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     checkAuth();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const checkAuth = async () => {
@@ -59,8 +68,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+  if (!context) {
+    // Evita tela branca se algum componente renderizar fora do provider.
+    // Mantemos isLoading=true para bloquear rotas até a árvore estabilizar.
+    console.warn('useAuth foi usado fora do AuthProvider. Verifique a árvore de Providers.');
+    return fallbackAuthContext;
   }
   return context;
 }
