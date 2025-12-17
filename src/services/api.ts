@@ -235,6 +235,57 @@ export const rejectOrder = async (id: string): Promise<ApiResponse<Order>> => {
   return { success: true, data: orders[index], message: 'Pedido rejeitado!' };
 };
 
+export const updateOrder = async (
+  id: string,
+  orderData: {
+    orderNumber: string;
+    date: string;
+    productId: string;
+    quantity: number;
+  },
+  isAdmin: boolean
+): Promise<ApiResponse<Order>> => {
+  await delay(400);
+  const index = orders.findIndex(o => o.id === id);
+  if (index === -1) {
+    return { success: false, error: 'Pedido não encontrado' };
+  }
+  
+  const product = products.find(p => p.id === orderData.productId);
+  if (!product) {
+    return { success: false, error: 'Produto não encontrado' };
+  }
+
+  const user = await getCurrentUser();
+  
+  // Se não for admin, volta para pendente
+  // Se for admin, mantém o status atual
+  const newStatus = isAdmin ? orders[index].status : 'pending';
+  const newApprovedBy = isAdmin ? orders[index].approvedBy : null;
+  const newApprovedByName = isAdmin ? orders[index].approvedByName : null;
+  
+  orders[index] = {
+    ...orders[index],
+    orderNumber: orderData.orderNumber,
+    date: orderData.date,
+    productId: orderData.productId,
+    productName: product.name,
+    supplier: product.supplier,
+    unitCost: product.unitCost,
+    quantity: orderData.quantity,
+    totalValue: product.unitCost * orderData.quantity,
+    status: newStatus,
+    approvedBy: newApprovedBy,
+    approvedByName: newApprovedByName,
+  };
+  
+  const message = isAdmin 
+    ? 'Pedido atualizado com sucesso!' 
+    : 'Pedido atualizado e enviado para aprovação!';
+  
+  return { success: true, data: orders[index], message };
+};
+
 // ============ STOCK ENTRIES ============
 
 let stockEntries = [...mockStockEntries];

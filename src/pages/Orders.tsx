@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Check, X, ArrowUpDown, Download } from 'lucide-react';
+import { Plus, Search, Check, X, ArrowUpDown, Download, Pencil } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,7 +29,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
-import { getOrders, getProducts, createOrder, approveOrder, rejectOrder } from '@/services/api';
+import { getOrders, getProducts, createOrder, approveOrder, rejectOrder, updateOrder } from '@/services/api';
 import { Order, Product } from '@/types';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { exportToExcel } from '@/lib/excel';
@@ -46,6 +46,7 @@ export default function Orders() {
   const [sortField, setSortField] = useState<SortField>('date');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [formData, setFormData] = useState({
     orderNumber: '',
     date: new Date().toISOString().split('T')[0],
@@ -141,32 +142,65 @@ export default function Orders() {
     toast({ title: 'Sucesso', description: 'Arquivo exportado com sucesso!' });
   };
 
+  const handleOpenDialog = (order?: Order) => {
+    if (order) {
+      setEditingOrder(order);
+      setFormData({
+        orderNumber: order.orderNumber,
+        date: order.date,
+        productId: order.productId,
+        quantity: order.quantity.toString(),
+      });
+    } else {
+      setEditingOrder(null);
+      setFormData({
+        orderNumber: '',
+        date: new Date().toISOString().split('T')[0],
+        productId: '',
+        quantity: '',
+      });
+    }
+    setDialogOpen(true);
+  };
+
+  const handleCloseDialog = () => {
+    setDialogOpen(false);
+    setEditingOrder(null);
+    setFormData({
+      orderNumber: '',
+      date: new Date().toISOString().split('T')[0],
+      productId: '',
+      quantity: '',
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     try {
-      const response = await createOrder({
+      const orderPayload = {
         orderNumber: formData.orderNumber,
         date: formData.date,
         productId: formData.productId,
         quantity: parseInt(formData.quantity),
-      });
+      };
+
+      let response;
+      if (editingOrder) {
+        response = await updateOrder(editingOrder.id, orderPayload, isAdmin);
+      } else {
+        response = await createOrder(orderPayload);
+      }
       
       if (response.success) {
         toast({ title: 'Sucesso', description: response.message });
         fetchData();
-        setDialogOpen(false);
-        setFormData({
-          orderNumber: '',
-          date: new Date().toISOString().split('T')[0],
-          productId: '',
-          quantity: '',
-        });
+        handleCloseDialog();
       }
     } catch (error) {
       toast({
         title: 'Erro',
-        description: 'Não foi possível criar o pedido.',
+        description: editingOrder ? 'Não foi possível atualizar o pedido.' : 'Não foi possível criar o pedido.',
         variant: 'destructive',
       });
     }
@@ -252,7 +286,7 @@ export default function Orders() {
             <Download className="h-4 w-4 mr-2" />
             Exportar Excel
           </Button>
-          <Button onClick={() => setDialogOpen(true)}>
+          <Button onClick={() => handleOpenDialog()}>
             <Plus className="h-4 w-4 mr-2" />
             Novo Pedido
           </Button>
@@ -303,9 +337,7 @@ export default function Orders() {
                   <TableHead>Solicitante</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Aprovador</TableHead>
-                  {isAdmin && (
-                    <TableHead className="text-right">Ações</TableHead>
-                  )}
+                  <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -330,15 +362,24 @@ export default function Orders() {
                         <TableCell>{order.createdByName}</TableCell>
                         <TableCell>{getStatusBadge(order.status)}</TableCell>
                         <TableCell>{order.approvedByName || '-'}</TableCell>
-                        {isAdmin && (
-                          <TableCell className="text-right">
-                            {order.status === 'pending' && (
-                              <div className="flex justify-end gap-2">
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleOpenDialog(order)}
+                              title="Editar pedido"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            {isAdmin && order.status === 'pending' && (
+                              <>
                                 <Button
                                   variant="ghost"
                                   size="icon"
                                   onClick={() => handleApprove(order.id)}
                                   className="text-success hover:text-success hover:bg-success/10"
+                                  title="Aprovar pedido"
                                 >
                                   <Check className="h-4 w-4" />
                                 </Button>
@@ -347,13 +388,14 @@ export default function Orders() {
                                   size="icon"
                                   onClick={() => handleReject(order.id)}
                                   className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                  title="Rejeitar pedido"
                                 >
                                   <X className="h-4 w-4" />
                                 </Button>
-                              </div>
+                              </>
                             )}
-                          </TableCell>
-                        )}
+                          </div>
+                        </TableCell>
                       </TableRow>
                     );
                   })
@@ -364,11 +406,16 @@ export default function Orders() {
         </CardContent>
       </Card>
 
-      {/* Create Order Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      {/* Create/Edit Order Dialog */}
+      <Dialog open={dialogOpen} onOpenChange={handleCloseDialog}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Novo Pedido</DialogTitle>
+            <DialogTitle>{editingOrder ? 'Editar Pedido' : 'Novo Pedido'}</DialogTitle>
+            {editingOrder && !isAdmin && (
+              <p className="text-sm text-muted-foreground">
+                Ao salvar, o pedido voltará para aprovação.
+              </p>
+            )}
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
@@ -455,11 +502,11 @@ export default function Orders() {
             )}
 
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
+              <Button type="button" variant="outline" onClick={handleCloseDialog}>
                 Cancelar
               </Button>
               <Button type="submit" disabled={!formData.productId || !formData.quantity}>
-                Criar Pedido
+                {editingOrder ? 'Salvar Alterações' : 'Criar Pedido'}
               </Button>
             </DialogFooter>
           </form>
