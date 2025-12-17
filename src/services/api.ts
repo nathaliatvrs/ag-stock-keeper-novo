@@ -54,7 +54,9 @@
  * - GET /stock-exits - Lista todas as saídas
  * - GET /stock-exits/:id - Busca saída por ID
  * - POST /stock-exits - Cria nova saída
+ * - PUT /stock-exits/:id - Atualiza saída (admin only)
  * - PUT /stock-exits/:id/confirm - Confirma saída (admin only)
+ * - DELETE /stock-exits/:id - Exclui saída (admin only) - devolve itens ao estoque
  * 
  * PARCELAS DE PAGAMENTO:
  * - GET /installments?stockEntryId=xxx - Lista parcelas de uma entrada
@@ -74,6 +76,7 @@ import {
   StockEntryInvoiceItem,
   StockItem, 
   StockExit,
+  StockExitItem,
   PaymentInstallment,
   DashboardStats,
   ApiResponse,
@@ -580,10 +583,27 @@ export const createStockExit = async (exitData: {
     return { success: false, error: 'Itens não encontrados' };
   }
 
+  // Agrupa por produto para criar items array
+  const productGroups = new Map<string, StockItem[]>();
+  items.forEach(item => {
+    const existing = productGroups.get(item.productId) || [];
+    productGroups.set(item.productId, [...existing, item]);
+  });
+
+  const exitItems: StockExitItem[] = Array.from(productGroups.entries()).map(([productId, productItems]) => ({
+    productId,
+    productName: productItems[0].productName,
+    supplier: productItems[0].supplier,
+    quantity: productItems.length,
+    totalCost: productItems.reduce((sum, i) => sum + i.unitCost, 0),
+    unitCost: productItems[0].unitCost,
+  }));
+
   const user = await getCurrentUser();
   const newExit: StockExit = {
     id: `exit-${Date.now()}`,
     stockItemIds: exitData.stockItemIds,
+    // Legacy fields (primeiro produto para compatibilidade)
     productId: items[0].productId,
     productName: items[0].productName,
     supplier: items[0].supplier,
@@ -597,6 +617,8 @@ export const createStockExit = async (exitData: {
     confirmedBy: null,
     confirmedByName: null,
     confirmedAt: null,
+    // Múltiplos produtos
+    items: exitItems,
   };
   
   stockExits = [...stockExits, newExit];
@@ -624,6 +646,54 @@ export const confirmStockExit = async (id: string): Promise<ApiResponse<StockExi
     confirmedAt: new Date().toISOString(),
   };
   return { success: true, data: stockExits[index], message: 'Saída confirmada!' };
+};
+
+export const updateStockExit = async (
+  id: string,
+  exitData: { exitDate: string; observation: string }
+): Promise<ApiResponse<StockExit>> => {
+  await delay(400);
+  const index = stockExits.findIndex(e => e.id === id);
+  if (index === -1) {
+    return { success: false, error: 'Saída não encontrada' };
+  }
+  
+  stockExits[index] = {
+    ...stockExits[index],
+    exitDate: exitData.exitDate,
+    observation: exitData.observation,
+  };
+  
+  // Atualiza a data de saída nos stock items
+  stockItems = stockItems.map(item => 
+    item.exitId === id 
+      ? { ...item, exitDate: exitData.exitDate }
+      : item
+  );
+  
+  return { success: true, data: stockExits[index], message: 'Saída atualizada!' };
+};
+
+export const deleteStockExit = async (id: string): Promise<ApiResponse<null>> => {
+  await delay(400);
+  const exitIndex = stockExits.findIndex(e => e.id === id);
+  if (exitIndex === -1) {
+    return { success: false, error: 'Saída não encontrada' };
+  }
+  
+  const exit = stockExits[exitIndex];
+  
+  // Devolve os itens ao estoque
+  stockItems = stockItems.map(item => 
+    exit.stockItemIds.includes(item.id)
+      ? { ...item, status: 'available' as const, exitId: null, exitDate: null }
+      : item
+  );
+  
+  // Remove a saída
+  stockExits = stockExits.filter(e => e.id !== id);
+  
+  return { success: true, message: 'Saída excluída e itens devolvidos ao estoque!' };
 };
 
 // ============ PAYMENT INSTALLMENTS ============

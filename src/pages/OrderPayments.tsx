@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
-import { Search, Download, Calendar } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { Search, Download, Calendar, ChevronDown, ChevronRight } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -18,10 +19,15 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { getPaymentInstallments, getStockEntries, getProducts } from '@/services/api';
-import { PaymentInstallment, StockEntry as StockEntryType, Product } from '@/types';
+import { PaymentInstallment, StockEntry as StockEntryType, Product, StockEntryInvoiceItem } from '@/types';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { exportToExcel } from '@/lib/excel';
 
@@ -32,6 +38,10 @@ export default function OrderPayments() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'paid'>('all');
+  const [supplierFilter, setSupplierFilter] = useState<string>('all');
+  const [dueDateFrom, setDueDateFrom] = useState('');
+  const [dueDateTo, setDueDateTo] = useState('');
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const { toast } = useToast();
 
   useEffect(() => {
@@ -64,6 +74,19 @@ export default function OrderPayments() {
     return entries.find((e) => e.id === stockEntryId);
   };
 
+  // Extrai lista de fornecedores únicos para o filtro
+  const uniqueSuppliers = useMemo(() => {
+    const suppliers = new Set<string>();
+    entries.forEach(entry => {
+      entry.invoices.forEach(inv => {
+        inv.items.forEach(item => {
+          suppliers.add(item.supplier);
+        });
+      });
+    });
+    return Array.from(suppliers).sort();
+  }, [entries]);
+
   // Helper para extrair informações dos produtos de uma entrada
   const getEntryProductsInfo = (entry: StockEntryType) => {
     const productNames: string[] = [];
@@ -80,6 +103,15 @@ export default function OrderPayments() {
       productNames: productNames.join(', '),
       suppliers: Array.from(suppliers).join(', '),
     };
+  };
+
+  // Extrai detalhes dos produtos por NF
+  const getInvoiceDetails = (entry: StockEntryType) => {
+    return entry.invoices.map(inv => ({
+      invoiceNumber: inv.invoiceNumber,
+      items: inv.items,
+      totalValue: inv.totalValue,
+    }));
   };
 
   const isOverdue = (dueDate: string) => {
@@ -100,8 +132,17 @@ export default function OrderPayments() {
       statusFilter === 'all' ||
       (statusFilter === 'paid' && isPaid) ||
       (statusFilter === 'pending' && !isPaid);
+
+    // Filtro por fornecedor
+    const matchesSupplier = supplierFilter === 'all' || 
+      entry.invoices.some(inv => inv.items.some(item => item.supplier === supplierFilter));
+
+    // Filtro por data de vencimento
+    const dueDate = new Date(inst.dueDate);
+    const matchesDueFrom = !dueDateFrom || dueDate >= new Date(dueDateFrom);
+    const matchesDueTo = !dueDateTo || dueDate <= new Date(dueDateTo);
     
-    return matchesSearch && matchesStatus;
+    return matchesSearch && matchesStatus && matchesSupplier && matchesDueFrom && matchesDueTo;
   });
 
   const totalPending = filteredInstallments
@@ -111,6 +152,16 @@ export default function OrderPayments() {
   const totalPaid = filteredInstallments
     .filter((i) => i.paidAt)
     .reduce((sum, i) => sum + i.value, 0);
+
+  const toggleExpanded = (id: string) => {
+    const newExpanded = new Set(expandedRows);
+    if (newExpanded.has(id)) {
+      newExpanded.delete(id);
+    } else {
+      newExpanded.add(id);
+    }
+    setExpandedRows(newExpanded);
+  };
 
   const handleExport = () => {
     const dataToExport = filteredInstallments.map((inst) => {
@@ -122,6 +173,7 @@ export default function OrderPayments() {
         'Fornecedores': entryInfo.suppliers,
         'Parcela': `${inst.installmentNumber}/${entry?.installments || '-'}`,
         'Valor': inst.value,
+        'Valor Total Pedido': entry?.totalValue || 0,
         'Vencimento': formatDate(inst.dueDate),
         'Status': inst.paidAt ? 'Pago' : isOverdue(inst.dueDate) ? 'Vencido' : 'Pendente',
         'Data Pagamento': inst.paidAt ? formatDate(inst.paidAt) : '-',
@@ -129,6 +181,14 @@ export default function OrderPayments() {
     });
     exportToExcel(dataToExport, 'pagamentos_pedidos');
     toast({ title: 'Sucesso', description: 'Arquivo exportado com sucesso!' });
+  };
+
+  const clearFilters = () => {
+    setSearchTerm('');
+    setStatusFilter('all');
+    setSupplierFilter('all');
+    setDueDateFrom('');
+    setDueDateTo('');
   };
 
   if (loading) {
@@ -195,9 +255,18 @@ export default function OrderPayments() {
       <Card>
         <CardHeader>
           <div className="flex flex-col gap-4">
-            <CardTitle>Parcelas</CardTitle>
-            <div className="flex flex-col sm:flex-row gap-4">
-              <div className="relative flex-1">
+            <div className="flex items-center justify-between">
+              <CardTitle>Parcelas</CardTitle>
+              {(searchTerm || statusFilter !== 'all' || supplierFilter !== 'all' || dueDateFrom || dueDateTo) && (
+                <Button variant="ghost" size="sm" onClick={clearFilters}>
+                  Limpar filtros
+                </Button>
+              )}
+            </div>
+            
+            {/* Filtros */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+              <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   placeholder="Buscar por pedido ou produto..."
@@ -206,30 +275,60 @@ export default function OrderPayments() {
                   className="pl-9"
                 />
               </div>
+              
               <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
-                <SelectTrigger className="w-[150px]">
+                <SelectTrigger>
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todos</SelectItem>
+                  <SelectItem value="all">Todos os Status</SelectItem>
                   <SelectItem value="pending">Pendente</SelectItem>
                   <SelectItem value="paid">Pago</SelectItem>
                 </SelectContent>
               </Select>
+
+              <Select value={supplierFilter} onValueChange={setSupplierFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Fornecedor" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos os Fornecedores</SelectItem>
+                  {uniqueSuppliers.map(supplier => (
+                    <SelectItem key={supplier} value={supplier}>{supplier}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <div className="space-y-1">
+                <Label className="text-xs">Vencimento de</Label>
+                <Input
+                  type="date"
+                  value={dueDateFrom}
+                  onChange={(e) => setDueDateFrom(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">Vencimento até</Label>
+                <Input
+                  type="date"
+                  value={dueDateTo}
+                  onChange={(e) => setDueDateTo(e.target.value)}
+                />
+              </div>
             </div>
           </div>
         </CardHeader>
         <CardContent>
-          <div className="rounded-md border overflow-x-auto">
+          <div className="rounded-md border">
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-[40px]"></TableHead>
                   <TableHead>Nº Pedido</TableHead>
-                  <TableHead>Produtos</TableHead>
-                  <TableHead>Fornecedores</TableHead>
-                  <TableHead>NFs</TableHead>
                   <TableHead>Parcela</TableHead>
-                  <TableHead>Valor</TableHead>
+                  <TableHead>Valor Parcela</TableHead>
+                  <TableHead>Valor Total Pedido</TableHead>
                   <TableHead>Vencimento</TableHead>
                   <TableHead>Status</TableHead>
                 </TableRow>
@@ -237,43 +336,97 @@ export default function OrderPayments() {
               <TableBody>
                 {filteredInstallments.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                       Nenhuma parcela encontrada
                     </TableCell>
                   </TableRow>
                 ) : (
                   filteredInstallments.map((inst) => {
                     const entry = getEntryInfo(inst.stockEntryId);
-                    const entryInfo = entry ? getEntryProductsInfo(entry) : { productNames: '-', suppliers: '-' };
-                    const invoiceNumbers = entry?.invoices.map(inv => inv.invoiceNumber).join(', ') || '-';
+                    const invoiceDetails = entry ? getInvoiceDetails(entry) : [];
                     const isPaid = inst.paidAt !== null;
                     const overdue = !isPaid && isOverdue(inst.dueDate);
+                    const isExpanded = expandedRows.has(inst.id);
 
                     return (
-                      <TableRow key={inst.id} className={overdue ? 'bg-destructive/5' : ''}>
-                        <TableCell className="font-medium">{entry?.orderNumber || '-'}</TableCell>
-                        <TableCell className="max-w-[200px] truncate" title={entryInfo.productNames}>
-                          {entryInfo.productNames}
-                        </TableCell>
-                        <TableCell className="max-w-[150px] truncate" title={entryInfo.suppliers}>
-                          {entryInfo.suppliers}
-                        </TableCell>
-                        <TableCell className="max-w-[100px] truncate" title={invoiceNumbers}>
-                          {invoiceNumbers}
-                        </TableCell>
-                        <TableCell>{inst.installmentNumber}/{entry?.installments || '-'}</TableCell>
-                        <TableCell>{formatCurrency(inst.value)}</TableCell>
-                        <TableCell>{formatDate(inst.dueDate)}</TableCell>
-                        <TableCell>
-                          {isPaid ? (
-                            <Badge className="bg-success text-success-foreground">Pago</Badge>
-                          ) : overdue ? (
-                            <Badge variant="destructive">Vencido</Badge>
-                          ) : (
-                            <Badge variant="secondary" className="bg-warning text-warning-foreground">Pendente</Badge>
-                          )}
-                        </TableCell>
-                      </TableRow>
+                      <Collapsible key={inst.id} open={isExpanded} asChild>
+                        <>
+                          <TableRow className={overdue ? 'bg-destructive/5' : ''}>
+                            <TableCell>
+                              <CollapsibleTrigger asChild>
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="h-6 w-6"
+                                  onClick={() => toggleExpanded(inst.id)}
+                                >
+                                  {isExpanded ? (
+                                    <ChevronDown className="h-4 w-4" />
+                                  ) : (
+                                    <ChevronRight className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              </CollapsibleTrigger>
+                            </TableCell>
+                            <TableCell className="font-medium">{entry?.orderNumber || '-'}</TableCell>
+                            <TableCell>{inst.installmentNumber}/{entry?.installments || '-'}</TableCell>
+                            <TableCell>{formatCurrency(inst.value)}</TableCell>
+                            <TableCell className="font-medium">{formatCurrency(entry?.totalValue || 0)}</TableCell>
+                            <TableCell>{formatDate(inst.dueDate)}</TableCell>
+                            <TableCell>
+                              {isPaid ? (
+                                <Badge className="bg-success text-success-foreground">Pago</Badge>
+                              ) : overdue ? (
+                                <Badge variant="destructive">Vencido</Badge>
+                              ) : (
+                                <Badge variant="secondary" className="bg-warning text-warning-foreground">Pendente</Badge>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                          <CollapsibleContent asChild>
+                            <TableRow className="bg-muted/30 hover:bg-muted/40">
+                              <TableCell colSpan={7} className="p-0">
+                                <div className="p-4 space-y-4">
+                                  {invoiceDetails.map((inv, invIdx) => (
+                                    <div key={invIdx} className="space-y-2">
+                                      <div className="flex items-center gap-2">
+                                        <Badge variant="outline">NF: {inv.invoiceNumber}</Badge>
+                                        <span className="text-sm text-muted-foreground">
+                                          Total NF: {formatCurrency(inv.totalValue)}
+                                        </span>
+                                      </div>
+                                      <div className="rounded border bg-background">
+                                        <Table>
+                                          <TableHeader>
+                                            <TableRow>
+                                              <TableHead className="text-xs">Produto</TableHead>
+                                              <TableHead className="text-xs">Fornecedor</TableHead>
+                                              <TableHead className="text-xs text-right">Qtd.</TableHead>
+                                              <TableHead className="text-xs text-right">Custo Unit.</TableHead>
+                                              <TableHead className="text-xs text-right">Total Produto</TableHead>
+                                            </TableRow>
+                                          </TableHeader>
+                                          <TableBody>
+                                            {inv.items.map((item, itemIdx) => (
+                                              <TableRow key={itemIdx}>
+                                                <TableCell className="text-sm py-2">{item.productName}</TableCell>
+                                                <TableCell className="text-sm py-2">{item.supplier}</TableCell>
+                                                <TableCell className="text-sm py-2 text-right">{item.quantity}</TableCell>
+                                                <TableCell className="text-sm py-2 text-right">{formatCurrency(item.adjustedUnitCost)}</TableCell>
+                                                <TableCell className="text-sm py-2 text-right font-medium">{formatCurrency(item.totalValue)}</TableCell>
+                                              </TableRow>
+                                            ))}
+                                          </TableBody>
+                                        </Table>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          </CollapsibleContent>
+                        </>
+                      </Collapsible>
                     );
                   })
                 )}

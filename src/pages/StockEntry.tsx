@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Plus, Search, Download, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -115,6 +115,35 @@ export default function StockEntry() {
   const selectedOrder = approvedOrders.find((o) => o.id === formData.orderId);
   const approvedItems = selectedOrder?.items.filter(item => item.status === 'approved') || [];
 
+  // Calcula quantidade já entrada no estoque para cada item do pedido selecionado
+  const enteredQuantitiesByOrderItem = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!selectedOrder) return map;
+    
+    entries.forEach(entry => {
+      if (entry.orderId === selectedOrder.id) {
+        entry.invoices.forEach(inv => {
+          inv.items.forEach(item => {
+            const current = map.get(item.orderItemId) || 0;
+            map.set(item.orderItemId, current + item.quantity);
+          });
+        });
+      }
+    });
+    return map;
+  }, [selectedOrder, entries]);
+
+  // Calcula quantidade pendente (do pedido - já entrada - no formulário atual)
+  const getRemainingQuantity = (orderItem: OrderItem, excludeInvoiceIndex?: number) => {
+    const alreadyEntered = enteredQuantitiesByOrderItem.get(orderItem.id) || 0;
+    const inCurrentForm = formData.invoices.reduce((sum, inv, idx) => {
+      if (excludeInvoiceIndex !== undefined && idx === excludeInvoiceIndex) return sum;
+      const item = inv.items.find(i => i.orderItemId === orderItem.id);
+      return sum + (parseInt(item?.quantity || '0') || 0);
+    }, 0);
+    return orderItem.quantity - alreadyEntered - inCurrentForm;
+  };
+
   // Calcula o total de todas as NFs
   const calculateTotalValue = () => {
     return formData.invoices.reduce((total, inv) => {
@@ -197,9 +226,19 @@ export default function StockEntry() {
     if (existingIndex >= 0) {
       newInvoices[invIndex].items.splice(existingIndex, 1);
     } else {
+      // Calcula quantidade pendente disponível
+      const remaining = getRemainingQuantity(orderItem, invIndex);
+      if (remaining <= 0) {
+        toast({ 
+          title: 'Atenção', 
+          description: `Todas as ${orderItem.quantity} unidades de ${orderItem.productName} já foram registradas.`,
+          variant: 'destructive' 
+        });
+        return;
+      }
       newInvoices[invIndex].items.push({
         orderItemId: orderItem.id,
-        quantity: orderItem.quantity.toString(),
+        quantity: remaining.toString(),
         adjustedUnitCost: orderItem.unitCost.toString(),
       });
     }
@@ -208,7 +247,26 @@ export default function StockEntry() {
 
   const handleItemFieldChange = (invIndex: number, itemIndex: number, field: string, value: string) => {
     const newInvoices = [...formData.invoices];
-    newInvoices[invIndex].items[itemIndex] = { ...newInvoices[invIndex].items[itemIndex], [field]: value };
+    const item = newInvoices[invIndex].items[itemIndex];
+    
+    // Valida quantidade máxima
+    if (field === 'quantity') {
+      const orderItem = approvedItems.find(oi => oi.id === item.orderItemId);
+      if (orderItem) {
+        const maxQty = getRemainingQuantity(orderItem, invIndex) + (parseInt(item.quantity) || 0);
+        const newQty = parseInt(value) || 0;
+        if (newQty > maxQty) {
+          toast({ 
+            title: 'Quantidade excedida', 
+            description: `Máximo disponível: ${maxQty} unidades`,
+            variant: 'destructive' 
+          });
+          value = maxQty.toString();
+        }
+      }
+    }
+    
+    newInvoices[invIndex].items[itemIndex] = { ...item, [field]: value };
     setFormData({ ...formData, invoices: newInvoices });
   };
 
@@ -223,6 +281,25 @@ export default function StockEntry() {
     if (formData.invoices.length === 0 || formData.invoices.every(inv => inv.items.length === 0)) {
       toast({ title: 'Erro', description: 'Adicione pelo menos uma NF com produtos.', variant: 'destructive' });
       return;
+    }
+
+    // Valida se nenhuma quantidade excede o disponível
+    for (const inv of formData.invoices) {
+      for (const item of inv.items) {
+        const orderItem = approvedItems.find(oi => oi.id === item.orderItemId);
+        if (orderItem) {
+          const remaining = getRemainingQuantity(orderItem);
+          const qty = parseInt(item.quantity) || 0;
+          if (qty > remaining + qty) { // remaining já exclui a quantidade atual
+            toast({ 
+              title: 'Erro', 
+              description: `Quantidade de ${orderItem.productName} excede o disponível no pedido.`, 
+              variant: 'destructive' 
+            });
+            return;
+          }
+        }
+      }
     }
 
     try {
@@ -426,22 +503,54 @@ export default function StockEntry() {
                             const isSelected = inv.items.some(i => i.orderItemId === orderItem.id);
                             const itemData = inv.items.find(i => i.orderItemId === orderItem.id);
                             const itemIndex = inv.items.findIndex(i => i.orderItemId === orderItem.id);
+                            const alreadyEntered = enteredQuantitiesByOrderItem.get(orderItem.id) || 0;
+                            const remaining = getRemainingQuantity(orderItem, invIndex);
+                            const inOtherInvoices = formData.invoices.reduce((sum, otherInv, idx) => {
+                              if (idx === invIndex) return sum;
+                              const found = otherInv.items.find(i => i.orderItemId === orderItem.id);
+                              return sum + (parseInt(found?.quantity || '0') || 0);
+                            }, 0);
+                            const maxForThisInvoice = orderItem.quantity - alreadyEntered - inOtherInvoices;
                             
                             return (
                               <div key={orderItem.id} className="p-2 border rounded bg-muted/30">
                                 <div className="flex items-center gap-2">
-                                  <Checkbox checked={isSelected} onCheckedChange={() => handleToggleItemInInvoice(invIndex, orderItem)} />
-                                  <span className="flex-1 text-sm">{orderItem.productName} ({orderItem.supplier})</span>
+                                  <Checkbox 
+                                    checked={isSelected} 
+                                    onCheckedChange={() => handleToggleItemInInvoice(invIndex, orderItem)} 
+                                    disabled={!isSelected && maxForThisInvoice <= 0}
+                                  />
+                                  <div className="flex-1 min-w-0">
+                                    <span className="text-sm font-medium truncate block">
+                                      {orderItem.productName} ({orderItem.supplier})
+                                    </span>
+                                    <span className="text-xs text-muted-foreground">
+                                      Pedido: {orderItem.quantity} | Já entrou: {alreadyEntered} | Pendente: {orderItem.quantity - alreadyEntered}
+                                    </span>
+                                  </div>
                                 </div>
                                 {isSelected && itemData && (
                                   <div className="grid grid-cols-2 gap-2 mt-2 pl-6">
                                     <div>
-                                      <Label className="text-xs">Quantidade</Label>
-                                      <Input type="number" min="1" max={orderItem.quantity} value={itemData.quantity} onChange={(e) => handleItemFieldChange(invIndex, itemIndex, 'quantity', e.target.value)} className="h-8" />
+                                      <Label className="text-xs">Qtd. (máx: {maxForThisInvoice + parseInt(itemData.quantity || '0')})</Label>
+                                      <Input
+                                        type="number"
+                                        min="1"
+                                        max={maxForThisInvoice + parseInt(itemData.quantity || '0')}
+                                        value={itemData.quantity}
+                                        onChange={(e) => handleItemFieldChange(invIndex, itemIndex, 'quantity', e.target.value)}
+                                        className="h-8"
+                                      />
                                     </div>
                                     <div>
                                       <Label className="text-xs">Custo Unit. Ajustado</Label>
-                                      <Input type="number" step="0.01" value={itemData.adjustedUnitCost} onChange={(e) => handleItemFieldChange(invIndex, itemIndex, 'adjustedUnitCost', e.target.value)} className="h-8" />
+                                      <Input
+                                        type="number"
+                                        step="0.01"
+                                        value={itemData.adjustedUnitCost}
+                                        onChange={(e) => handleItemFieldChange(invIndex, itemIndex, 'adjustedUnitCost', e.target.value)}
+                                        className="h-8"
+                                      />
                                     </div>
                                   </div>
                                 )}
@@ -455,13 +564,10 @@ export default function StockEntry() {
                 </div>
 
                 {totalValue > 0 && (
-                  <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg">
-                    <div className="flex justify-between items-center">
-                      <span>Total do Pedido:</span>
-                      <span className="text-xl font-bold text-primary">{formatCurrency(totalValue)}</span>
-                    </div>
+                  <div className="p-3 bg-muted/50 rounded-lg space-y-1">
+                    <p className="text-sm"><strong>Valor Total:</strong> {formatCurrency(totalValue)}</p>
                     {parseInt(formData.installments) > 1 && (
-                      <p className="text-sm text-muted-foreground mt-1">{formData.installments}x de {formatCurrency(installmentValue)}</p>
+                      <p className="text-sm"><strong>Valor por Parcela:</strong> {formatCurrency(installmentValue)} ({formData.installments}x)</p>
                     )}
                   </div>
                 )}
