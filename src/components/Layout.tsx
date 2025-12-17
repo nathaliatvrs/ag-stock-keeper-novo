@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Home,
   Package,
@@ -12,9 +12,13 @@ import {
   Menu,
   BoxesIcon,
   CreditCard,
+  User,
+  Shield,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { useAuth } from '@/contexts/AuthContext';
 import agLogo from '@/assets/ag-logo.png';
 
 interface NavItem {
@@ -51,6 +55,8 @@ export default function Layout({ children }: LayoutProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [expandedMenus, setExpandedMenus] = useState<string[]>(['Pagamentos']);
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, isAdmin, logout } = useAuth();
 
   const isActive = (path: string) => {
     if (path === '/') return location.pathname === '/';
@@ -61,6 +67,11 @@ export default function Layout({ children }: LayoutProps) {
     setExpandedMenus((prev) =>
       prev.includes(title) ? prev.filter((t) => t !== title) : [...prev, title]
     );
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    navigate('/login');
   };
 
   const NavContent = () => (
@@ -82,6 +93,46 @@ export default function Layout({ children }: LayoutProps) {
           </div>
         )}
       </div>
+
+      {/* User Info */}
+      {user && (
+        <div className={cn(
+          "px-4 py-3 border-b border-sidebar-border",
+          collapsed && "px-2"
+        )}>
+          <div className={cn(
+            "flex items-center gap-3",
+            collapsed && "justify-center"
+          )}>
+            <div className={cn(
+              "flex items-center justify-center rounded-full bg-primary/20",
+              collapsed ? "h-8 w-8" : "h-10 w-10"
+            )}>
+              {isAdmin ? (
+                <Shield className="h-5 w-5 text-primary" />
+              ) : (
+                <User className="h-5 w-5 text-primary" />
+              )}
+            </div>
+            {!collapsed && (
+              <div className="flex flex-col min-w-0">
+                <span className="text-sm font-medium text-sidebar-foreground truncate">{user.name}</span>
+                <div className="flex items-center gap-1.5">
+                  <Badge 
+                    variant={isAdmin ? "default" : "secondary"} 
+                    className={cn(
+                      "text-[10px] px-1.5 py-0",
+                      isAdmin && "bg-primary/80"
+                    )}
+                  >
+                    {isAdmin ? 'Admin' : 'Usuário'}
+                  </Badge>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto scrollbar-thin">
@@ -155,6 +206,22 @@ export default function Layout({ children }: LayoutProps) {
         ))}
       </nav>
 
+      {/* Logout Button */}
+      <div className="px-3 py-3 border-t border-sidebar-border">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleLogout}
+          className={cn(
+            "w-full text-sidebar-foreground/80 hover:text-destructive hover:bg-destructive/10",
+            collapsed && "px-2"
+          )}
+        >
+          <LogOutIcon className={cn("h-5 w-5", !collapsed && "mr-2")} />
+          {!collapsed && <span>Sair</span>}
+        </Button>
+      </div>
+
       {/* Collapse Button - Desktop only */}
       <div className="hidden lg:flex px-3 py-4 border-t border-sidebar-border">
         <Button
@@ -182,17 +249,27 @@ export default function Layout({ children }: LayoutProps) {
   return (
     <div className="min-h-screen flex w-full bg-background">
       {/* Mobile Header */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-sidebar flex items-center gap-3 px-4 h-14 border-b border-sidebar-border">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setMobileOpen(!mobileOpen)}
-          className="text-sidebar-foreground hover:bg-sidebar-accent"
-        >
-          <Menu className="h-6 w-6" />
-        </Button>
-        <img src={agLogo} alt="AG Consultoria" className="h-8 w-auto" />
-        <span className="font-bold text-sidebar-foreground">AG Consultoria</span>
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-sidebar flex items-center justify-between px-4 h-14 border-b border-sidebar-border">
+        <div className="flex items-center gap-3">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setMobileOpen(!mobileOpen)}
+            className="text-sidebar-foreground hover:bg-sidebar-accent"
+          >
+            <Menu className="h-6 w-6" />
+          </Button>
+          <img src={agLogo} alt="AG Consultoria" className="h-8 w-auto" />
+          <span className="font-bold text-sidebar-foreground">AG Consultoria</span>
+        </div>
+        {user && (
+          <Badge 
+            variant={isAdmin ? "default" : "secondary"} 
+            className={cn("text-xs", isAdmin && "bg-primary/80")}
+          >
+            {isAdmin ? 'Admin' : 'Usuário'}
+          </Badge>
+        )}
       </div>
 
       {/* Mobile Sidebar Overlay */}
