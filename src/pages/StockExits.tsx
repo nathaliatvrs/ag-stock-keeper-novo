@@ -140,12 +140,18 @@ export default function StockExits() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label>Selecione os itens para saída:</Label>
-              <div className="border rounded-md max-h-[200px] overflow-y-auto">
+              <div className="border rounded-md max-h-[300px] overflow-y-auto">
                 {availableItems.map((item) => (
-                  <div key={item.id} className="flex items-center gap-3 p-2 border-b last:border-b-0 hover:bg-muted/50">
+                  <div key={item.id} className="flex items-center gap-3 p-3 border-b last:border-b-0 hover:bg-muted/50">
                     <Checkbox checked={selectedItems.includes(item.id)} onCheckedChange={(checked) => setSelectedItems(checked ? [...selectedItems, item.id] : selectedItems.filter((i) => i !== item.id))} />
-                    <span className="flex-1">{item.productName}</span>
-                    <span className="text-sm text-muted-foreground">{formatCurrency(item.unitCost)}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium truncate">{item.productName}</p>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground mt-1">
+                        <span>Fornecedor: {item.supplier}</span>
+                        <span>Entrada: {formatDate(item.entryDate)}</span>
+                      </div>
+                    </div>
+                    <span className="text-sm font-medium text-primary whitespace-nowrap">{formatCurrency(item.unitCost)}</span>
                   </div>
                 ))}
               </div>
