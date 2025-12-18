@@ -1,73 +1,60 @@
-# Welcome to your Lovable project
+# AG Consultoria - Sistema de Inventário
 
-## Project info
+Sistema de gestão de inventário desenvolvido para AG Consultoria, com controle de pedidos, entrada/saída de estoque, e gestão de pagamentos.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## Documentação
 
-## How can I edit this code?
+| Documento | Descrição |
+|-----------|-----------|
+| [DATABASE.md](./docs/DATABASE.md) | Scripts SQL, schema, índices e políticas RLS |
+| [BUSINESS_RULES.md](./docs/BUSINESS_RULES.md) | Regras de negócio e workflows |
+| [API_REFERENCE.md](./docs/API_REFERENCE.md) | Documentação completa dos endpoints REST |
+| [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | Arquitetura do sistema e stack tecnológica |
 
-There are several ways of editing your application.
+## Stack Tecnológica
 
-**Use Lovable**
+- **Frontend**: React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui
+- **Backend (planejado)**: GCP Cloud Functions, Cloud SQL (PostgreSQL)
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+## Funcionalidades
 
-Changes made via Lovable will be committed automatically to this repo.
+- ✅ Cadastro de produtos com fornecedor e custo
+- ✅ Pedidos multi-produto com workflow de aprovação
+- ✅ Entrada de estoque com múltiplas NFs e ajuste de preço
+- ✅ Visão explodida do estoque (1 linha = 1 unidade)
+- ✅ Saída de estoque com rastreabilidade
+- ✅ Gestão de parcelas de pagamento
+- ✅ Exportação Excel em todas as telas
+- ✅ Hierarquia de usuários (Admin/User)
 
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
+## Instalação
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
+# Clone o repositório
 git clone <YOUR_GIT_URL>
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+# Instale as dependências
+npm install
 
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
+# Inicie o servidor de desenvolvimento
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+## Variáveis de Ambiente
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+```env
+VITE_API_URL=https://api.agconsultoria.com.br/v1
+VITE_ENV=production
+```
 
-**Use GitHub Codespaces**
+## Desenvolvimento
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+O projeto segue abordagem **frontend-first**:
+1. Frontend completo com dados mockados (`src/services/mockData.ts`)
+2. API documentada em `docs/API_REFERENCE.md`
+3. Equipe backend implementa endpoints seguindo documentação
+4. Substituir mock por chamadas reais em `src/services/api.ts`
 
-## What technologies are used for this project?
+## Deploy
 
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+Abra o projeto no [Lovable](https://lovable.dev) e clique em Share → Publish.
